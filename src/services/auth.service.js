@@ -118,6 +118,26 @@ export class AuthService {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7); // Set session expiry (7 days)
 
+    // First, check if there's an existing session with this refresh token
+    const existingSession = await prisma.session.findFirst({
+      where: {
+        userId,
+        refreshToken,
+      },
+    });
+
+    if (existingSession) {
+      // Update the existing session
+      return await prisma.session.update({
+        where: { id: existingSession.id },
+        data: {
+          expiresAt,
+          updatedAt: new Date(),
+        },
+      });
+    }
+
+    // Create a new session
     const session = await prisma.session.create({
       data: {
         userId,
