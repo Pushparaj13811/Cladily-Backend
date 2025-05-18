@@ -412,6 +412,40 @@ const updateUsername = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * Verify phone number with OTP
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+const verifyPhone = async (req, res) => {
+  try {
+    const { phoneNumber, otp } = req.body;
+
+    if (!phoneNumber || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: 'Phone number and OTP are required',
+      });
+    }
+
+    const otpService = new OtpService();
+    const verified = await otpService.verifyOTP(phoneNumber, otp);
+
+    if (verified) {
+      return res.status(200).json({
+        success: true,
+        message: 'Phone number verified successfully',
+      });
+    }
+  } catch (error) {
+    console.error('Error verifying phone:', error);
+    return res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to verify phone number',
+    });
+  }
+};
+
 export {
     registerUser,
     loginUser,
@@ -425,4 +459,5 @@ export {
     updateUsername,
     verifyEmail,
     resendVerificationEmail,
+    verifyPhone
 };

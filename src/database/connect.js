@@ -1,46 +1,34 @@
-import pkg from '@prisma/client';
-const { PrismaClient } = pkg;
+import { PrismaClient } from '@prisma/client';
 
-/**
- * PrismaClient singleton instance
- * Ensures a single connection pool is used across the application
- */
-
-// Create global variable to maintain prisma instance across hot reloads in development
-const globalForPrisma = global;
-globalForPrisma.prisma = globalForPrisma.prisma || new PrismaClient({
-  log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+export const prisma = new PrismaClient({
+  log: ['error', 'warn'],
+  errorFormat: 'pretty',
 });
 
-// Export singleton instance
-const prisma = globalForPrisma.prisma;
-
 /**
- * Connect to the database with the Prisma client
+ * Connect to the database
+ * @returns {Promise<void>}
  */
 const connect = async () => {
   try {
     await prisma.$connect();
-    console.log('Database :: Prisma :: Connection :: Successful');
-    return prisma;
   } catch (error) {
-    console.error(`Error :: Database :: Prisma :: Connection :: Failed :: ${error}`);
-    process.exit(1);
+    console.error(`Error connecting to database: ${error.message}`);
+    throw error;
   }
 };
 
 /**
  * Disconnect from the database
+ * @returns {Promise<void>}
  */
 export const disconnect = async () => {
   try {
     await prisma.$disconnect();
-    console.log('Database :: Prisma :: Disconnected');
   } catch (error) {
-    console.error(`Error :: Database :: Prisma :: Disconnect :: Failed :: ${error}`);
-    process.exit(1);
+    console.error(`Error disconnecting from database: ${error.message}`);
+    throw error;
   }
 };
 
-export { prisma };
 export default connect;
