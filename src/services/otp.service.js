@@ -1,6 +1,8 @@
 import { prisma } from '../database/connect.js';
 import redisManager from '../utils/redisClient.js';
 import { otpKeys } from '../utils/redisKeys.js';
+import { AuthService } from './auth.service.js';
+import { generateTokens } from '../utils/tokenGenerator.js';
 
 /**
  * OTP Service
@@ -10,6 +12,7 @@ export class OtpService {
   constructor() {
     this.OTP_EXPIRY = 10 * 60; // 10 minutes in seconds
     this.MAX_ATTEMPTS = 3;
+    this.authService = new AuthService();
   }
 
   /**
@@ -221,5 +224,79 @@ export class OtpService {
       console.error('Error verifying email OTP:', error);
       throw error;
     }
+  }
+
+  /**
+   * Request OTP for login
+   * @param {string} phoneNumber - User's phone number
+   * @returns {Object} - OTP info without the actual OTP
+   */
+  async requestOtpLogin(phoneNumber) {
+    if (!phoneNumber) {
+      throw new Error('Phone number is required');
+    }
+    
+    // Check if user exists
+    const user = await prisma.user.findUnique({
+      where: { phoneNumber },
+    });
+    
+    if (!user) {
+      throw new Error('User not found with this phone number');
+    }
+    
+    // Generate OTP
+    const { otp, expiresAt } = await this.generateOTP(phoneNumber);
+    
+    // Send OTP via SMS
+    await this.sendOtpSms(phoneNumber, otp);
+    
+    return {
+      phoneNumber,
+      expiresAt,
+      message: 'OTP sent successfully',
+    };
+  }
+
+  /**
+   * Verify OTP for login
+   * @param {string} phoneNumber - User's phone number
+   * @param {string} otp - OTP to verify
+   * @returns {Object} - User and tokens
+   */
+  async verifyOtpLogin(phoneNumber, otp) {
+    if (!phoneNumber || !otp) {
+      throw new Error('Phone number and OTP are required');
+    }
+    
+    // Verify OTP
+    const isValid = await this.verifyOTP(phoneNumber, otp);
+    
+    if (!isValid) {
+      throw new Error('Invalid OTP');
+    }
+    
+    // Get user
+    const user = await prisma.user.findUnique({
+      where: { phoneNumber },
+    });
+    
+    if (!user) {
+      throw new Error('User not found');
+    }
+    
+    // Generate tokens using the token generator utility
+    const { accessToken, refreshToken } = generateTokens(user);
+    
+    // Create session
+    await this.authService.createSession(user.id, refreshToken);
+    
+    // Return user and tokens
+    const { password: _, ...userWithoutPassword } = user;
+    return {
+      user: userWithoutPassword,
+      accessToken,
+      refreshToken,
+    };
   }
 } 

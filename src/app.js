@@ -34,7 +34,7 @@ const app = express();
 app.use(morgan("dev"));
 app.use(
     cors({
-        origin: process.env.CORS_ORIGIN,
+        origin: process.env.FRONTEND_URL,
         credentials: true,
     })
 );

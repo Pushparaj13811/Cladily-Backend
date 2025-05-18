@@ -1,7 +1,10 @@
 import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { prisma } from '../database/connect.js';
+import { 
+  generateTokens, 
+  verifyRefreshToken 
+} from '../utils/tokenGenerator.js';
 
 /**
  * Authentication Service
@@ -90,8 +93,8 @@ export class AuthService {
       throw new Error('Invalid password');
     }
 
-    // Generate tokens
-    const { accessToken, refreshToken } = this.generateTokens(user);
+    // Generate tokens using the token generator utility
+    const { accessToken, refreshToken } = generateTokens(user);
 
     // Create session
     await this.createSession(user.id, refreshToken);
@@ -144,38 +147,14 @@ export class AuthService {
   }
 
   /**
-   * Generate access and refresh tokens
-   * @param {Object} user - User object
-   * @returns {Object} - Access and refresh tokens
-   */
-  generateTokens(user) {
-    const accessToken = jwt.sign(
-      { 
-        userId: user.id,
-        role: user.role,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: '1h' }
-    );
-
-    const refreshToken = jwt.sign(
-      { userId: user.id },
-      process.env.JWT_REFRESH_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    return { accessToken, refreshToken };
-  }
-
-  /**
    * Refresh access token using refresh token
    * @param {string} refreshToken - Refresh token
    * @returns {Object} - New access and refresh tokens
    */
   async refreshToken(refreshToken) {
     try {
-      // Verify refresh token
-      const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+      // Verify refresh token using the token generator utility
+      const decoded = verifyRefreshToken(refreshToken);
       
       // Find valid session
       const session = await prisma.session.findFirst({
@@ -195,8 +174,8 @@ export class AuthService {
         throw new Error('Invalid session');
       }
 
-      // Generate new tokens
-      const tokens = this.generateTokens(session.user);
+      // Generate new tokens using the token generator utility
+      const tokens = generateTokens(session.user);
       
       // Update session with new refresh token
       await prisma.session.update({

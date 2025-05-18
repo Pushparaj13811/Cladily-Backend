@@ -1,8 +1,12 @@
-import jwt from 'jsonwebtoken';
 import ApiError from '../utils/apiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { HTTP_UNAUTHORIZED, HTTP_FORBIDDEN } from '../httpStatusCode.js';
 import { prisma } from '../database/connect.js';
+import { 
+  verifyAccessToken, 
+  verifyCookieValue, 
+  generateGuestToken 
+} from '../utils/tokenGenerator.js';
 
 /**
  * Authentication middleware
@@ -11,14 +15,23 @@ import { prisma } from '../database/connect.js';
 export const authenticate = asyncHandler(async (req, res, next) => {
   try {
     // Get token from Authorization header or cookies
-    const token = req.cookies?.accessToken || req.header('Authorization')?.replace('Bearer ', '');
+    let token = req.cookies?.accessToken || req.header('Authorization')?.replace('Bearer ', '');
 
     if (!token) {
       throw new ApiError(HTTP_UNAUTHORIZED, 'Authentication required');
     }
 
-    // Verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    // If token comes from a cookie, verify the cookie signature
+    if (req.cookies?.accessToken) {
+      const verifiedValue = verifyCookieValue(req.cookies.accessToken);
+      if (!verifiedValue) {
+        throw new ApiError(HTTP_UNAUTHORIZED, 'Invalid cookie signature');
+      }
+      token = verifiedValue;
+    }
+
+    // Verify token using the token generator utility
+    const decoded = verifyAccessToken(token);
 
     // Find user
     const user = await prisma.user.findUnique({
@@ -115,50 +128,50 @@ export const allowGuest = asyncHandler(async (req, res, next) => {
     
     if (guestToken) {
       // Verify guest token
-      const decoded = jwt.verify(guestToken, process.env.JWT_SECRET);
-      req.guestId = decoded.guestId;
+      try {
+        const decoded = verifyAccessToken(guestToken);
+        req.guestId = decoded.guestId;
+      } catch (error) {
+        // If token is invalid, create a new one
+        const newGuestToken = generateGuestToken();
+        req.guestId = newGuestToken.split('.')[0];
+        
+        // Set cookie for guest token
+        res.cookie('guestToken', newGuestToken, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        });
+      }
     } else {
-      // Create new guest ID
-      const guestId = `guest_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-      req.guestId = guestId;
-      
-      // Create guest token
-      const guestToken = jwt.sign(
-        { guestId },
-        process.env.JWT_SECRET,
-        { expiresIn: '30d' }
-      );
+      // Create new guest token
+      const newGuestToken = generateGuestToken();
+      req.guestId = newGuestToken.split('.')[0];
       
       // Set cookie for guest token
-      res.cookie('guestToken', guestToken, {
+      res.cookie('guestToken', newGuestToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       });
       
       // Also send in header for non-browser clients
-      res.setHeader('X-Guest-Token', guestToken);
+      res.setHeader('X-Guest-Token', newGuestToken);
     }
     
     next();
   } catch (error) {
     // If there's any issue with the guest token, create a new one
-    const guestId = `guest_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
-    req.guestId = guestId;
+    const newGuestToken = generateGuestToken();
+    req.guestId = newGuestToken.split('.')[0];
     
-    const guestToken = jwt.sign(
-      { guestId },
-      process.env.JWT_SECRET,
-      { expiresIn: '30d' }
-    );
-    
-    res.cookie('guestToken', guestToken, {
+    res.cookie('guestToken', newGuestToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     });
     
-    res.setHeader('X-Guest-Token', guestToken);
+    res.setHeader('X-Guest-Token', newGuestToken);
     next();
   }
 });
