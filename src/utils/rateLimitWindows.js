@@ -51,6 +51,14 @@ export const PUBLIC_API_LIMITS = {
     type: RATE_LIMIT_TYPE.IP,
   },
 
+  // Write operations for public use (like cart operations)
+  WRITE: {
+    windowMs: TIME_WINDOWS.MINUTE,
+    max: 30, // 30 write requests per minute
+    algorithm: RATE_LIMIT_ALGORITHM.SLIDING_WINDOW,
+    type: RATE_LIMIT_TYPE.IP,
+  },
+
   // For extremely lightweight endpoints
   RELAXED: {
     windowMs: TIME_WINDOWS.MINUTE,

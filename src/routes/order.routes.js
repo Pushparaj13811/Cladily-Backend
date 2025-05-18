@@ -9,31 +9,33 @@ import {
     returnProduct
 } from "../controllers/order.controller.js";
 import { authenticate } from "../middlewares/auth.middleware.js";
+import { rateLimiter } from "../middlewares/rateLimiter.middleware.js";
+import { AUTHENTICATED_API_LIMITS } from "../utils/rateLimitWindows.js";
 
 const router = express.Router();
 
 // All routes require authentication
 router.use(authenticate);
 
-// Get all orders for the user
-router.get('/', getAllOrders);
+// Get all orders for the user - read operation
+router.get('/', rateLimiter(AUTHENTICATED_API_LIMITS.STANDARD), getAllOrders);
 
-// Get a specific order
-router.get('/:orderId', getOrderById);
+// Get a specific order - read operation
+router.get('/:orderId', rateLimiter(AUTHENTICATED_API_LIMITS.STANDARD), getOrderById);
 
-// Create a new order
-router.post('/create', createOrder);
+// Create a new order - write operation
+router.post('/create', rateLimiter(AUTHENTICATED_API_LIMITS.WRITE), createOrder);
 
-// Update order status (admin only)
-router.patch('/:orderId/status', updateOrderStatus);
+// Update order status (admin only) - write operation
+router.patch('/:orderId/status', rateLimiter(AUTHENTICATED_API_LIMITS.WRITE), updateOrderStatus);
 
-// Cancel an order
-router.post('/:orderId/cancel', cancelOrder);
+// Cancel an order - sensitive operation
+router.post('/:orderId/cancel', rateLimiter(AUTHENTICATED_API_LIMITS.SENSITIVE), cancelOrder);
 
-// Cancel specific items in an order
-router.post('/:orderId/cancel-items', cancelOrderItems);
+// Cancel specific items in an order - sensitive operation
+router.post('/:orderId/cancel-items', rateLimiter(AUTHENTICATED_API_LIMITS.SENSITIVE), cancelOrderItems);
 
-// Return a product
-router.post('/items/:orderItemId/return', returnProduct);
+// Return a product - sensitive operation
+router.post('/items/:orderItemId/return', rateLimiter(AUTHENTICATED_API_LIMITS.SENSITIVE), returnProduct);
 
 export default router;
