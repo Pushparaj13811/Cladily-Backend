@@ -3,8 +3,7 @@ import asyncHandler from '../utils/asyncHandler.js';
 import { HTTP_UNAUTHORIZED, HTTP_FORBIDDEN } from '../httpStatusCode.js';
 import { prisma } from '../database/connect.js';
 import { 
-  verifyAccessToken, 
-  verifyCookieValue, 
+  verifyAccessToken,
   generateGuestToken 
 } from '../utils/tokenGenerator.js';
 
@@ -25,40 +24,6 @@ export const authenticate = asyncHandler(async (req, res, next) => {
 
     if (!token) {
       throw new ApiError(HTTP_UNAUTHORIZED, 'Authentication required');
-    }
-
-    // If token comes from a cookie, verify the cookie signature
-    if (req.cookies?.accessToken) {
-      console.log('Cookie value length:', req.cookies.accessToken.length);
-      console.log('Cookie format check:', req.cookies.accessToken.includes('.'));
-      
-      const verifiedValue = verifyCookieValue(req.cookies.accessToken);
-      console.log('Verified value:', verifiedValue);
-      if (!verifiedValue) {
-        console.log('Invalid cookie signature for token');
-        
-        // Check if the cookie value already looks like a JWT (not signed)
-        // This could happen if client directly sets the cookie instead of server
-        const jwtParts = req.cookies.accessToken.split('.');
-        if (jwtParts.length === 3) {
-          console.log('Cookie appears to be a raw JWT token, attempting direct verification');
-          try {
-            // Try to verify it directly as a JWT
-            const decoded = verifyAccessToken(req.cookies.accessToken);
-            if (decoded) {
-              console.log('Token verified directly as JWT');
-              token = req.cookies.accessToken;
-            }
-          } catch (jwtError) {
-            console.log('Direct JWT verification also failed:', jwtError.message);
-            throw new ApiError(HTTP_UNAUTHORIZED, 'Invalid token');
-          }
-        } else {
-          throw new ApiError(HTTP_UNAUTHORIZED, 'Invalid cookie signature');
-        }
-      } else {
-        token = verifiedValue;
-      }
     }
 
     // Verify token using the token generator utility

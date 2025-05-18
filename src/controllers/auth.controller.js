@@ -3,7 +3,6 @@ import { OtpService } from '../services/otp.service.js';
 import ApiError from '../utils/apiError.js';
 import ApiResponse from '../utils/apiResponse.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import { signCookieValue, verifyCookieValue } from '../utils/tokenGenerator.js';
 import {
   HTTP_OK,
   HTTP_CREATED,

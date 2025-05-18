@@ -447,57 +447,85 @@ const verifyPhone = async (req, res) => {
 };
 
 /**
- * Activate a user account (for users stuck in PENDING_VERIFICATION)
+ * Activate a user account that is in PENDING_VERIFICATION status
+ * This is a duplicate of the auth.controller.js activateAccount function,
+ * but accessible via a different route for backward compatibility
  */
 const activateUserAccount = asyncHandler(async (req, res) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user?.id;
     
-    // Get current user status
+    if (!userId) {
+      throw new ApiError(HTTP_UNAUTHORIZED, 'User not authenticated');
+    }
+    
+    // Fetch current user status
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: {
-        status: true,
-      },
+      select: { status: true }
     });
     
     if (!user) {
-      throw new ApiError(HTTP_NOT_FOUND, "User not found");
+      throw new ApiError(HTTP_NOT_FOUND, 'User not found');
     }
     
-    // Only activate if in PENDING_VERIFICATION status
     if (user.status !== 'PENDING_VERIFICATION') {
-      return res
-        .status(HTTP_OK)
-        .json(new ApiResponse(HTTP_OK, "User account is already active", { status: user.status }));
+      throw new ApiError(
+        HTTP_BAD_REQUEST, 
+        `Account activation failed. Current status: ${user.status}`
+      );
     }
     
     // Update user status to ACTIVE
     const updatedUser = await prisma.user.update({
       where: { id: userId },
-      data: {
-        status: 'ACTIVE',
-      },
+      data: { status: 'ACTIVE' },
       select: {
         id: true,
         email: true,
-        phoneNumber: true,
         firstName: true,
         lastName: true,
+        phoneNumber: true,
         role: true,
         status: true,
-        phoneVerified: true,
         emailVerified: true,
-      },
+        phoneVerified: true,
+      }
+    });
+    
+    console.log(`User ${userId} activated successfully`);
+    
+    // Generate new tokens with updated user info
+    const { accessToken, refreshToken } = await authService.generateNewTokensForUser(updatedUser);
+    
+    // Set cookies
+    res.cookie('accessToken', accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'Strict',
+      maxAge: 60 * 60 * 1000 // 1 hour
+    });
+    
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'Strict',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
     
     return res
       .status(HTTP_OK)
-      .json(new ApiResponse(HTTP_OK, "User account activated successfully", updatedUser));
+      .json(
+        new ApiResponse(HTTP_OK, 'Account activated successfully', {
+          user: updatedUser,
+          accessToken,
+          refreshToken
+        })
+      );
   } catch (error) {
     throw new ApiError(
       HTTP_INTERNAL_SERVER_ERROR,
-      error.message || "Error activating user account"
+      error.message || 'Error activating account'
     );
   }
 });

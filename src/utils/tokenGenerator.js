@@ -73,35 +73,6 @@ const verifyRefreshToken = (token) => {
 };
 
 /**
- * Generate a signed cookie value (DEPRECATED - KEPT FOR BACKWARDS COMPATIBILITY)
- * @param {string} value - Value to store in cookie
- * @returns {string} The value itself (no longer signed)
- */
-const signCookieValue = (value) => {
-  // Return the value as is - we no longer sign cookies
-  return value;
-};
-
-/**
- * Verify a signed cookie value (DEPRECATED - KEPT FOR BACKWARDS COMPATIBILITY)
- * @param {string} signedValue - Value from cookie
- * @returns {string|null} The value itself if it looks like a JWT, null otherwise
- */
-const verifyCookieValue = (signedValue) => {
-  // Check if the value looks like a JWT (has two dots separating three base64 segments)
-  if (typeof signedValue === 'string' && signedValue.split('.').length === 3) {
-    // It looks like a JWT, return it directly
-    return signedValue;
-  }
-  
-  // For legacy signed cookies, attempt to extract the value
-  const [value] = signedValue.split('.');
-  if (value) return value;
-  
-  return null;
-};
-
-/**
  * Generate a guest token
  * @returns {string} Random token for guest users
  */
@@ -121,7 +92,5 @@ export {
   generateTokens,
   verifyAccessToken,
   verifyRefreshToken,
-  signCookieValue,
-  verifyCookieValue,
   generateGuestToken
 };
