@@ -2,13 +2,12 @@ import express from 'express';
 import {
     getUserProfile,
     updateUserProfile,
-    changePassword,
+    changeCurrentPassword,
     forgotPassword,
     resetPassword,
     resendVerificationEmail,
     verifyEmail,
-    requestPhoneVerification,
-    verifyPhone,
+    resendVerificationCode,
 } from '../controllers/user.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 
@@ -25,11 +24,10 @@ router.use(authenticate);
 // Profile routes
 router.get('/profile', getUserProfile);
 router.put('/profile', updateUserProfile);
-router.post('/change-password', changePassword);
+router.post('/change-password', changeCurrentPassword);
 router.post('/resend-verification', resendVerificationEmail);
 
 // Phone verification
-router.post('/request-phone-verification', requestPhoneVerification);
-router.post('/verify-phone', verifyPhone);
+router.post('/request-phone-verification', resendVerificationCode);
 
 export default router;
