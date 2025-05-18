@@ -11,7 +11,6 @@ import {
     HTTP_INTERNAL_SERVER_ERROR,
 } from "../httpStatusCode.js";
 import ApiResponse from "../utils/apiResponse.js";
-import mongoose from "mongoose";
 import sendVerificationCode from "../services/sendVerificationCode.service.js";
 import { UserService } from "../services/user.service.js";
 import { EmailService } from "../services/email.service.js";
@@ -514,129 +513,6 @@ const updateUsername = asyncHandler(async (req, res) => {
     }
 });
 
-const updateUserAddress = asyncHandler(async (req, res) => {
-    const userId = req.user._id;
-    const { addressId } = req.params;
-    const { 
-        fullName, 
-        line1, 
-        line2, 
-        city, 
-        state, 
-        postalCode, 
-        country, 
-        phoneNumber,
-        isDefault,
-        addressType,
-        isShipping,
-        isBilling
-    } = req.body;
-
-    if (!addressId) {
-        throw new ApiError(HTTP_BAD_REQUEST, "Address ID is required");
-    }
-
-    if (!fullName || !line1 || !city || !state || !postalCode || !country) {
-        throw new ApiError(HTTP_BAD_REQUEST, "Required address fields are missing");
-    }
-
-    try {
-        const address = await userService.updateUserAddress(userId, addressId, {
-            fullName, 
-            line1, 
-            line2, 
-            city, 
-            state, 
-            postalCode, 
-            country, 
-            phoneNumber,
-            isDefault,
-            addressType,
-            isShipping,
-            isBilling
-        });
-
-        return res
-            .status(HTTP_OK)
-            .json(new ApiResponse(HTTP_OK, "Address updated successfully", address));
-    } catch (error) {
-        if (error.message.includes('Address not found or unauthorized')) {
-            throw new ApiError(HTTP_NOT_FOUND, error.message);
-        }
-        
-        throw new ApiError(
-            HTTP_INTERNAL_SERVER_ERROR,
-            error.message || "Error updating address"
-        );
-    }
-});
-
-const getUserAddress = asyncHandler(async (req, res) => {
-    const userId = req.user._id;
-
-    if (!userId) {
-        throw new ApiError(
-            HTTP_UNAUTHORIZED,
-            "You are not authorized to get user address"
-        );
-    }
-
-    try {
-        const userAddress = await Address.find({ userId });
-
-        if (!userAddress) {
-            throw new ApiError(HTTP_NOT_FOUND, "User address not found");
-        }
-
-        return res
-            .status(HTTP_OK)
-            .json(new ApiResponse(HTTP_OK, "User address", userAddress));
-    } catch (error) {
-        throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, error.message);
-    }
-});
-
-const deleteUserAddress = asyncHandler(async (req, res) => {
-    const userId = req.user._id;
-
-    if (!userId) {
-        throw new ApiError(
-            HTTP_UNAUTHORIZED,
-            "You are not authorized to delete user address"
-        );
-    }
-
-    const { addressId } = req.params;
-
-    const id = new mongoose.Types.ObjectId(addressId);
-
-    if (!addressId) {
-        throw new ApiError(HTTP_BAD_REQUEST, "Address ID is required");
-    }
-
-    try {
-        const address = await Address.findOneAndDelete({
-            _id: id,
-            userId: userId,
-        });
-
-        if (!address) {
-            throw new ApiError(
-                HTTP_NOT_FOUND,
-                "Address not found or unauthorized to delete address"
-            );
-        }
-
-        return res
-            .status(HTTP_OK)
-            .json(
-                new ApiResponse(HTTP_OK, "Address deleted successfully", null)
-            );
-    } catch (error) {
-        throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, error.message);
-    }
-});
-
 export {
     registerUser,
     loginUser,
@@ -648,9 +524,6 @@ export {
     getUserProfile,
     updateUserProfile,
     updateUsername,
-    updateUserAddress,
     verifyEmail,
     resendVerificationEmail,
-    getUserAddress,
-    deleteUserAddress,
 };

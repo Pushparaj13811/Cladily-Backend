@@ -1,15 +1,28 @@
-import { Router } from "express";
+import express from 'express';
 import {
     createCategory,
-    deleteCategory,
     getCategories,
-} from "../controllers/category.controller.js";
-import {verifyToken} from "../middlewares/auth.middleware.js";
+    getCategoryById,
+    getCategoryBySlug,
+    updateCategory,
+    deleteCategory
+} from '../controllers/category.controller.js';
+import { authenticate } from '../middlewares/auth.middleware.js';
+import { isAdmin } from '../middlewares/role.middleware.js';
 
-const router = Router();
+const router = express.Router();
 
-router.route("/").get(getCategories);
-router.route("/create").post(verifyToken, createCategory);
-router.route("/delete/:categoryId").delete(verifyToken, deleteCategory);
+// Public routes
+router.get('/', getCategories);
+router.get('/id/:id', getCategoryById);
+router.get('/slug/:slug', getCategoryBySlug);
+
+// Admin routes (requires authentication and admin role)
+router.use(authenticate);
+router.use(isAdmin);
+
+router.post('/', createCategory);
+router.put('/:id', updateCategory);
+router.delete('/:id', deleteCategory);
 
 export default router;

@@ -7,16 +7,17 @@ import morgan from "morgan";
 import authRouter from "./routes/auth.routes.js";
 
 // Import other routers here
-import productRouter from "./routes/product.route.js";
-import userRouter from "./routes/user.route.js";
-import categoryRouter from "./routes/category.route.js";
-import reviewRouter from "./routes/review.route.js";
-import couponRouter from "./routes/coupon.route.js";
-import orderRouter from "./routes/order.route.js";
-import wishlistRouter from "./routes/wishlist.route.js";
-import cartRouter from "./routes/cart.route.js";
-import guestRouter from "./routes/guest.route.js";
-import salesRouter from "./routes/sales.route.js";
+import productRouter from "./routes/product.routes.js";
+import userRouter from "./routes/user.routes.js";
+import categoryRouter from "./routes/category.routes.js";
+import reviewRouter from "./routes/review.routes.js";
+import couponRouter from "./routes/coupon.routes.js";
+import orderRouter from "./routes/order.routes.js";
+import wishlistRouter from './routes/wishlists.routes.js'
+// import cartRouter from "./routes/cart.routes.js";
+// import guestRouter from "./routes/guest.routes.js";
+// import salesRouter from "./routes/sales.routes.js";
+import addressRouter from "./routes/address.routes.js";
 
 config();
 
@@ -53,9 +54,10 @@ app.use("/api/reviews", reviewRouter);
 app.use("/api/coupons", couponRouter);
 app.use("/api/orders", orderRouter);
 app.use("/api/wishlist", wishlistRouter);
-app.use("/api/cart", cartRouter);
-app.use("/api/guest", guestRouter);
-app.use("/api/sales", salesRouter);
+// app.use("/api/cart", cartRouter);
+// app.use("/api/guest", guestRouter);
+// app.use("/api/sales", salesRouter);
+app.use("/api/addresses", addressRouter);
 
 // Root endpoint
 app.get("/", (req, res) => {

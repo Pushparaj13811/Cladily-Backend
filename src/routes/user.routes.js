@@ -7,10 +7,6 @@ import {
     resetPassword,
     resendVerificationEmail,
     verifyEmail,
-    getUserAddresses,
-    addUserAddress,
-    updateUserAddress,
-    deleteUserAddress,
     requestPhoneVerification,
     verifyPhone,
 } from '../controllers/user.controller.js';
@@ -35,11 +31,5 @@ router.post('/resend-verification', resendVerificationEmail);
 // Phone verification
 router.post('/request-phone-verification', requestPhoneVerification);
 router.post('/verify-phone', verifyPhone);
-
-// Address routes
-router.get('/addresses', getUserAddresses);
-router.post('/addresses', addUserAddress);
-router.put('/addresses/:addressId', updateUserAddress);
-router.delete('/addresses/:addressId', deleteUserAddress);
 
 export default router;
