@@ -335,6 +335,13 @@ model Category {
   children    Category[] @relation("CategoryHierarchy")
   position    Int        @default(0)
   isActive    Boolean    @default(true)
+  isVisible   Boolean    @default(true)
+  level       Int        @default(0) // Hierarchy level (0 for root categories)
+  path        String     @default("/") // Path in category tree (e.g., /1/5/12/)
+  metaTitle   String?
+  metaDescription String?
+  metaKeywords   String?
+  iconUrl     String?
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   deletedAt   DateTime?
@@ -345,6 +352,7 @@ model Category {
   @@index([slug])
   @@index([parentId])
   @@index([isActive])
+  @@index([level])
 }
 
 model ProductCategory {

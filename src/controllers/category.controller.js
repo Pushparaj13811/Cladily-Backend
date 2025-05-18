@@ -30,7 +30,7 @@ const createCategory = asyncHandler(async (req, res) => {
         metaKeywords, 
         imageUrl, 
         iconUrl, 
-        sortOrder 
+        position 
     } = req.body;
 
     // Validate required fields
@@ -51,7 +51,7 @@ const createCategory = asyncHandler(async (req, res) => {
             metaKeywords,
             imageUrl,
             iconUrl,
-            sortOrder
+            position
         });
 
         return res
@@ -256,7 +256,7 @@ const updateCategory = asyncHandler(async (req, res) => {
         metaKeywords, 
         imageUrl, 
         iconUrl, 
-        sortOrder 
+        position 
     } = req.body;
     
     if (!categoryId) {
@@ -281,7 +281,7 @@ const updateCategory = asyncHandler(async (req, res) => {
             metaKeywords,
             imageUrl,
             iconUrl,
-            sortOrder
+            position
         });
 
         return res
