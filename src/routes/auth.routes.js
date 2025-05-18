@@ -8,6 +8,7 @@ import {
   refreshAccessToken,
   getUserDebugInfo,
   testAdminAccess,
+  activateAccount
 } from '../controllers/auth.controller.js';
 import { authenticate, isAdmin } from '../middlewares/auth.middleware.js';
 import { rateLimiter } from '../middlewares/rateLimiter.middleware.js';
@@ -73,5 +74,12 @@ router.get('/debug', authenticate, getUserDebugInfo);
  * @access Admin only
  */
 router.get('/admin-test', authenticate, isAdmin, testAdminAccess);
+
+/**
+ * @route POST /api/auth/activate-account
+ * @desc Activate user account
+ * @access Private
+ */
+router.post('/activate-account', authenticate, activateAccount);
 
 export default router; 

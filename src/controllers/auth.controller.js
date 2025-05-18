@@ -83,13 +83,9 @@ export const loginWithPassword = asyncHandler(async (req, res) => {
       password
     );
 
-    // Sign cookies with COOKIE_SECRET for added security
-    const signedAccessToken = signCookieValue(accessToken);
-    const signedRefreshToken = signCookieValue(refreshToken);
-
-    // Set cookies
-    res.cookie('accessToken', signedAccessToken, accessTokenCookieOptions);
-    res.cookie('refreshToken', signedRefreshToken, refreshTokenCookieOptions);
+    // Set cookies directly with the token (no signing)
+    res.cookie('accessToken', accessToken, accessTokenCookieOptions);
+    res.cookie('refreshToken', refreshToken, refreshTokenCookieOptions);
 
     return res
       .status(HTTP_OK)
@@ -145,20 +141,17 @@ export const verifyOtp = asyncHandler(async (req, res) => {
       otp
     );
 
-    // Sign cookies with COOKIE_SECRET for added security
-    const signedAccessToken = signCookieValue(accessToken);
-    const signedRefreshToken = signCookieValue(refreshToken);
-
-    // Set cookies
-    res.cookie('accessToken', signedAccessToken, accessTokenCookieOptions);
-    res.cookie('refreshToken', signedRefreshToken, refreshTokenCookieOptions);
+    // Set cookies directly with the token (no signing)
+    res.cookie('accessToken', accessToken, accessTokenCookieOptions);
+    res.cookie('refreshToken', refreshToken, refreshTokenCookieOptions);
 
     return res
       .status(HTTP_OK)
       .json(
         new ApiResponse(HTTP_OK, 'OTP verified and login successful', {
           user,
-          accessToken, // Still send token in response for API clients
+          accessToken,
+          refreshToken
         })
       );
   } catch (error) {
@@ -170,15 +163,18 @@ export const verifyOtp = asyncHandler(async (req, res) => {
  * Logout user
  */
 export const logout = asyncHandler(async (req, res) => {
-  const { refreshToken } = req.cookies;
+  const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
   const userId = req.user?.id;
 
-  if (!refreshToken || !userId) {
+  if (!userId) {
     throw new ApiError(HTTP_BAD_REQUEST, 'User not authenticated');
   }
 
   try {
-    await authService.logout(userId, refreshToken);
+    // Try to log out all the user's sessions with the current refreshToken
+    if (refreshToken) {
+      await authService.logout(userId, refreshToken);
+    }
 
     // Clear cookies
     res.clearCookie('accessToken');
@@ -203,9 +199,9 @@ export const refreshAccessToken = asyncHandler(async (req, res) => {
   const cookieRefreshToken = req.cookies?.refreshToken;
   const bodyRefreshToken = req.body?.refreshToken;
   const headerRefreshToken = req.header('X-Refresh-Token');
-
+  
   const refreshToken = cookieRefreshToken || bodyRefreshToken || headerRefreshToken;
-
+  
   console.log('Refresh token request received:', {
     fromCookie: !!cookieRefreshToken,
     fromBody: !!bodyRefreshToken,
@@ -218,30 +214,17 @@ export const refreshAccessToken = asyncHandler(async (req, res) => {
   }
 
   try {
-    // Verify cookie signature if token from cookie
-    let verifiedToken = refreshToken;
-    if (cookieRefreshToken) {
-      verifiedToken = verifyCookieValue(cookieRefreshToken);
-      if (!verifiedToken) {
-        throw new ApiError(HTTP_UNAUTHORIZED, 'Invalid refresh token signature');
-      }
-    }
-
     console.log('Processing refresh token request');
-
-    // Get new tokens
+    
+    // Get new tokens - no need to verify cookie signature
     const { accessToken, refreshToken: newRefreshToken } = await authService.refreshToken(
-      verifiedToken
+      refreshToken
     );
 
-    // Sign cookies with COOKIE_SECRET for added security
-    const signedAccessToken = signCookieValue(accessToken);
-    const signedRefreshToken = signCookieValue(newRefreshToken);
-
     // Set new cookies
-    res.cookie('accessToken', signedAccessToken, accessTokenCookieOptions);
-    res.cookie('refreshToken', signedRefreshToken, refreshTokenCookieOptions);
-
+    res.cookie('accessToken', accessToken, accessTokenCookieOptions);
+    res.cookie('refreshToken', newRefreshToken, refreshTokenCookieOptions);
+    
     console.log('Successfully refreshed tokens');
 
     return res
@@ -268,11 +251,11 @@ export const getUserDebugInfo = asyncHandler(async (req, res) => {
   try {
     // Get user from request (set by authentication middleware)
     const userId = req.user?.id;
-
+    
     if (!userId) {
       throw new ApiError(HTTP_UNAUTHORIZED, 'User not authenticated');
     }
-
+    
     // Fetch user with full details from database
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -290,11 +273,11 @@ export const getUserDebugInfo = asyncHandler(async (req, res) => {
         updatedAt: true,
       }
     });
-
+    
     if (!user) {
       throw new ApiError(HTTP_NOT_FOUND, 'User not found');
     }
-
+    
     // Get active sessions
     const sessions = await prisma.session.findMany({
       where: {
@@ -309,7 +292,7 @@ export const getUserDebugInfo = asyncHandler(async (req, res) => {
         ipAddress: true
       }
     });
-
+    
     return res
       .status(HTTP_OK)
       .json(
@@ -339,7 +322,7 @@ export const getUserDebugInfo = asyncHandler(async (req, res) => {
 export const testAdminAccess = asyncHandler(async (req, res) => {
   // This endpoint can only be accessed if the user is authenticated and has admin role
   // The middleware will handle the role check, so if we get here, the user is an admin
-
+  
   return res
     .status(HTTP_OK)
     .json(
@@ -352,4 +335,76 @@ export const testAdminAccess = asyncHandler(async (req, res) => {
         message: 'You have successfully accessed an admin-only endpoint'
       })
     );
+});
+
+/**
+ * Activate user account
+ * Changes user status from PENDING_VERIFICATION to ACTIVE
+ */
+export const activateAccount = asyncHandler(async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      throw new ApiError(HTTP_UNAUTHORIZED, 'User not authenticated');
+    }
+    
+    // Fetch current user status
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { status: true }
+    });
+    
+    if (!user) {
+      throw new ApiError(HTTP_NOT_FOUND, 'User not found');
+    }
+    
+    if (user.status !== 'PENDING_VERIFICATION') {
+      throw new ApiError(
+        HTTP_BAD_REQUEST, 
+        `Account activation failed. Current status: ${user.status}`
+      );
+    }
+    
+    // Update user status to ACTIVE
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: { status: 'ACTIVE' },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        phoneNumber: true,
+        role: true,
+        status: true,
+        emailVerified: true,
+        phoneVerified: true,
+      }
+    });
+    
+    console.log(`User ${userId} activated successfully`);
+    
+    // Generate new tokens with updated user info
+    const { accessToken, refreshToken } = await authService.generateNewTokensForUser(updatedUser);
+    
+    // Set cookies directly with the new tokens
+    res.cookie('accessToken', accessToken, accessTokenCookieOptions);
+    res.cookie('refreshToken', refreshToken, refreshTokenCookieOptions);
+    
+    return res
+      .status(HTTP_OK)
+      .json(
+        new ApiResponse(HTTP_OK, 'Account activated successfully', {
+          user: updatedUser,
+          accessToken,
+          refreshToken
+        })
+      );
+  } catch (error) {
+    throw new ApiError(
+      HTTP_INTERNAL_SERVER_ERROR,
+      error.message || 'Error activating account'
+    );
+  }
 }); 

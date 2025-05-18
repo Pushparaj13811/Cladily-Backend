@@ -52,6 +52,7 @@ const verifyAccessToken = (token) => {
   try {
     return jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
   } catch (error) {
+    console.log(`Token verification error: ${error.message}`);
     throw error; // Rethrow to be handled by middleware
   }
 };
@@ -66,36 +67,38 @@ const verifyRefreshToken = (token) => {
   try {
     return jwt.verify(token, process.env.REFRESH_TOKEN_SECRET);
   } catch (error) {
+    console.log(`Refresh token verification error: ${error.message}`);
     throw error; // Rethrow to be handled by middleware
   }
 };
 
 /**
- * Generate a signed cookie value
+ * Generate a signed cookie value (DEPRECATED - KEPT FOR BACKWARDS COMPATIBILITY)
  * @param {string} value - Value to store in cookie
- * @returns {string} Signed cookie value
+ * @returns {string} The value itself (no longer signed)
  */
 const signCookieValue = (value) => {
-  const hmac = crypto.createHmac('sha256', process.env.COOKIE_SECRET);
-  hmac.update(value);
-  const signature = hmac.digest('base64');
-  return `${value}.${signature}`;
+  // Return the value as is - we no longer sign cookies
+  return value;
 };
 
 /**
- * Verify a signed cookie value
- * @param {string} signedValue - Signed cookie value
- * @returns {string|null} Original value if signature is valid, null otherwise
+ * Verify a signed cookie value (DEPRECATED - KEPT FOR BACKWARDS COMPATIBILITY)
+ * @param {string} signedValue - Value from cookie
+ * @returns {string|null} The value itself if it looks like a JWT, null otherwise
  */
 const verifyCookieValue = (signedValue) => {
-  const [value, signature] = signedValue.split('.');
-  if (!value || !signature) return null;
+  // Check if the value looks like a JWT (has two dots separating three base64 segments)
+  if (typeof signedValue === 'string' && signedValue.split('.').length === 3) {
+    // It looks like a JWT, return it directly
+    return signedValue;
+  }
   
-  const hmac = crypto.createHmac('sha256', process.env.COOKIE_SECRET);
-  hmac.update(value);
-  const expectedSignature = hmac.digest('base64');
+  // For legacy signed cookies, attempt to extract the value
+  const [value] = signedValue.split('.');
+  if (value) return value;
   
-  return signature === expectedSignature ? value : null;
+  return null;
 };
 
 /**

@@ -5,6 +5,8 @@ import {
   generateTokens, 
   verifyRefreshToken 
 } from '../utils/tokenGenerator.js';
+import ApiError from '../utils/apiError.js';
+import { HTTP_BAD_REQUEST, HTTP_UNAUTHORIZED, HTTP_INTERNAL_SERVER_ERROR } from '../httpStatusCode.js';
 
 /**
  * Authentication Service
@@ -227,5 +229,27 @@ export class AuthService {
    */
   async verifyPassword(password, hash) {
     return await bcrypt.compare(password, hash);
+  }
+
+  /**
+   * Generate new tokens for a user (used after account status changes)
+   * @param {Object} user - User object
+   * @returns {Object} New access and refresh tokens
+   */
+  async generateNewTokensForUser(user) {
+    try {
+      // Generate new tokens
+      const { accessToken, refreshToken } = generateTokens(user);
+      
+      // Create a new session
+      await this.createSession(user.id, refreshToken);
+      
+      return { accessToken, refreshToken };
+    } catch (error) {
+      throw new ApiError(
+        HTTP_INTERNAL_SERVER_ERROR, 
+        error.message || 'Error generating tokens'
+      );
+    }
   }
 } 
