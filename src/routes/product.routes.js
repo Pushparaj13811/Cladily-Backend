@@ -1,20 +1,38 @@
 import Router from "express";
 import {
     createProduct,
+    getProductById,
+    getProductBySlug,
+    getAllProducts,
     updateProduct,
     deleteProduct,
-    fetchAllProducts,
-    fetchProductById,
+    getRelatedProducts,
+    updateInventory
 } from "../controllers/product.controller.js";
-import { verifyToken } from "../middlewares/auth.middleware.js";
-import { handleDynamicFields,upload } from "../middlewares/multer.middleware.js";
+import { authenticate, isAdmin } from "../middlewares/auth.middleware.js";
+import { handleDynamicFields, upload } from "../middlewares/multer.middleware.js";
 
 const router = Router();
 
-router.route("/").get(fetchAllProducts);
-router.route("/:id").get(fetchProductById);
-router.route("/create").post(verifyToken,upload, handleDynamicFields, createProduct);
-router.route("/update/:id").put(verifyToken, updateProduct);
-router.route("/delete/:id").delete(verifyToken, deleteProduct);
+// Public routes
+router.get("/", getAllProducts);
+router.get("/:productId", getProductById);
+router.get("/slug/:slug", getProductBySlug);
+router.get("/:productId/related", getRelatedProducts);
+
+// Admin routes (require authentication)
+router.use(authenticate);
+
+// Create product (admin only)
+router.post("/", isAdmin, upload, handleDynamicFields, createProduct);
+
+// Update product (admin only)
+router.put("/:productId", isAdmin, upload, handleDynamicFields, updateProduct);
+
+// Delete product (admin only)
+router.delete("/:productId", isAdmin, deleteProduct);
+
+// Update product inventory (admin only)
+router.patch("/:productId/inventory", isAdmin, updateInventory);
 
 export default router;

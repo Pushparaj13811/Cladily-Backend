@@ -1,8 +1,7 @@
 import asyncHandler from "../utils/asyncHandler.js";
 import ApiError from "../utils/apiError.js";
 import ApiResponse from "../utils/apiResponse.js";
-import { Review } from "../models/review.model.js";
-import { Product } from "../models/product.model.js";
+import { ReviewService } from "../services/review.service.js";
 import {
     HTTP_BAD_REQUEST,
     HTTP_CREATED,
@@ -10,178 +9,46 @@ import {
     HTTP_NOT_FOUND,
     HTTP_OK,
 } from "../httpStatusCode.js";
-import { uploadOnCloudinary } from "../services/cloudinary.service.js";
-import { ReviewImage } from "../models/reviewImage.model.js";
-import mongoose from "mongoose";
 
+// Initialize the service
+const reviewService = new ReviewService();
+
+/**
+ * Create a new product review
+ */
 const createReview = asyncHandler(async (req, res) => {
-    // Get the product ID from the request body
-    // Check if the product exists
-    // Get the user ID from the request body
-    // Get the review details from the request body
-    // Validate and sanitize the review details
-    // Get images by user of the product
-    // if images are provided, upload them to the cloudinary
-    // save the image urls to the database in review images model
-    // Check if the user has already reviewed the product throw an error if they have already reviewed the product
-    // Create a new review
-    // Save the review to the database
-    // Send the response to the client with the newly created review
-    // Handle errors if any occur during the process and send an error response
+    const { productId, rating, comment, title } = req.body;
+    const userId = req.user.id;
 
-    const { productId, rating, comment } = req.body;
-
-    const userId = req.user._id;
-
-    const orderItem = Product.aggregate([
-        { $match: { _id: productId } },
-        {
-            $lookup: {
-                from: "order",
-                localField: "userId",
-                foreignField: "userId",
-                as: "order",
-            },
-        },
-        {
-            $lookup: {
-                from: "orderItem",
-                localField: "_id",
-                foreignField: "orderId",
-                as: "orderItem",
-            },
-        },
-        {
-            $project: {
-                _id: 1,
-                status: 1,
-            },
-        },
-    ]);
-
-    if (!orderItem) {
-        throw new ApiError(HTTP_NOT_FOUND, "Product not found");
-    }
-
-    if (orderItem.status !== "Delivered") {
-        throw new ApiError(
-            HTTP_NOT_FOUND,
-            "You are not allowed to review a product you haven't bought"
-        );
+    if (!productId) {
+        throw new ApiError(HTTP_BAD_REQUEST, "Product ID is required");
     }
 
     if (!rating || rating < 1 || rating > 5) {
         throw new ApiError(HTTP_BAD_REQUEST, "Rating must be between 1 and 5");
     }
 
-    if (!comment) {
-        throw new ApiError(HTTP_BAD_REQUEST, "Comment is required");
-    }
-
-    const images = req.files?.images;
-    const imageUrls = [];
-
-    const session = await Review.startSession();
-    session.startTransaction();
     try {
-        if (images && images.length > 0) {
-            const imageUrls = images.map((image) => {
-                return image.path;
-            });
-            imageUrls.map(async (url) => {
-                const { secure_url } = await uploadOnCloudinary(url);
-                imageUrls.push(secure_url);
-                if (!secure_url) {
-                    throw new ApiError(
-                        HTTP_INTERNAL_SERVER_ERROR,
-                        "Image upload failed"
-                    );
-                }
-            });
-        }
-
-        const review = new Review({
-            user: userId,
-            product: productId,
-            rating,
-            comment,
-        }).session(session);
-
-        const reviewImages = new ReviewImage({
-            userId: userId,
-            reviewId: review._id,
-            imageUrl: imageUrls,
-        }).session(session);
-        await review.save().session(session);
-        await reviewImages.save().session(session);
-
-        const aggregate = await Review.aggregate([
-            { $match: { _id: review._id } },
-            {
-                $lookup: {
-                    from: "users",
-                    localField: "userId",
-                    foreignField: "_id",
-                    as: "user",
-                },
-                $lookup: {
-                    from: "reviewImages",
-                    localField: "_id",
-                    foreignField: "reviewId",
-                    as: "images",
-                },
-            },
-            { $unwind: "$user" },
-            { $unwind: "$images" },
-            {
-                $project: {
-                    _id: 1,
-                    rating: 1,
-                    comment: 1,
-                    "user.name": 1,
-                    "user.email": 1,
-                    "images.imageUrl": 1,
-                },
-            },
-        ]).session(session);
-
-        await session.commitTransaction();
-
+        const reviewData = { rating, comment, title };
+        const imageFiles = req.files?.images || [];
+        
+        const review = await reviewService.createReview(userId, productId, reviewData, imageFiles);
+        
         return res.status(HTTP_CREATED).json(
-            new ApiResponse(HTTP_CREATED, "Review created successfully", {
-                aggregate,
-            })
+            new ApiResponse(HTTP_CREATED, review, "Review created successfully")
         );
     } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
-        throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, error.message);
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Failed to create review"
+        );
     }
 });
+
+/**
+ * Get reviews for a product with pagination
+ */
 const getReviews = asyncHandler(async (req, res) => {
-    //      Validate the presence of `productId` in the request parameters.
-    //     - If missing, throw an error indicating that the product ID is required.
-    //   Set the `page` number from the query parameters, defaulting to 1 if not provided.
-    //   Set the `pageSize` from the query parameters, defaulting to 10 if not provided.
-    //   Calculate the number of documents to skip based on the current page number.
-
-    //   Perform an aggregation query on the `Review` collection:
-    //     - Match reviews for the specified `productId`.
-    //     - Use `$lookup` to join the `users` collection to get user details (`name`, `email`) for each review.
-    //     - Use `$unwind` to deconstruct the user array for each review.
-    //     - Use `$lookup` to join the `reviewImages` collection to get the images associated with each review.
-    //     - Use `$facet` to:
-    //       a. Get the paginated reviews:
-    //          - Apply `$skip` to skip the calculated number of documents.
-    //          - Apply `$limit` to limit the number of documents to `pageSize`.
-    //          - Project only the necessary fields (review details, user details, and images).
-    //       b. Count the total number of reviews that match the product ID.
-
-    //   Extract the `reviews` and `total` from the aggregation result.
-    //   Calculate the total number of pages based on `total` and `pageSize`.
-    //   Return the reviews along with pagination details (total reviews, current page, page size, total pages).
-    //   Handle any errors by throwing an appropriate error response.
-
     const productId = req.params.productId;
 
     if (!productId) {
@@ -190,236 +57,346 @@ const getReviews = asyncHandler(async (req, res) => {
 
     try {
         const page = parseInt(req.query.page) || 1;
-        const pageSize = parseInt(req.query.pageSize) || 10;
-        const skip = (page - 1) * pageSize;
-
-        const reviewsData = await Review.aggregate([
-            { $match: { product: productId } }, // Match reviews for the specific product
-            {
-                $lookup: {
-                    from: "users",
-                    localField: "userId",
-                    foreignField: "_id",
-                    as: "user",
-                },
-            },
-            { $unwind: "$user" },
-            {
-                $lookup: {
-                    from: "reviewImages",
-                    localField: "_id",
-                    foreignField: "reviewId",
-                    as: "images",
-                },
-            },
-            {
-                $facet: {
-                    reviews: [
-                        { $skip: skip },
-                        { $limit: pageSize },
-                        {
-                            $project: {
-                                _id: 1,
-                                rating: 1,
-                                comment: 1,
-                                "user.name": 1,
-                                // "user.email": 1,
-                                images: { $ifNull: ["$images", []] }, // Handle empty arrays
-                            },
-                        },
-                    ],
-                    total: [{ $count: "total" }],
-                },
-            },
-        ]);
-
-        const reviews = reviewsData[0].reviews;
-        const total = reviewsData[0].total[0]?.total || 0;
-        const totalPages = Math.ceil(total / pageSize);
-
+        const limit = parseInt(req.query.limit) || 10;
+        
+        const result = await reviewService.getProductReviews(productId, {
+            page,
+            limit,
+            status: "APPROVED" // Only show approved reviews to customers
+        });
+        
         return res.status(HTTP_OK).json(
-            new ApiResponse(HTTP_OK, "Reviews retrieved successfully", {
-                reviews,
-                paginate: {
-                    total,
-                    page,
-                    pageSize,
-                    totalPages,
-                },
-            })
+            new ApiResponse(
+                HTTP_OK, 
+                result, 
+                "Reviews retrieved successfully"
+            )
         );
     } catch (error) {
         throw new ApiError(
-            error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
-            error.message || "Internal server error"
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Failed to retrieve reviews"
         );
     }
 });
+
+/**
+ * Get a specific review by ID
+ */
 const getReview = asyncHandler(async (req, res) => {
-    // Get the review ID from the request params
-    // Check if the review exists
-    // Get the review details
-    // Send the response to the client with the review details
-    // Handle errors if any occur during the process and send an error response
-
-    const reviewId = req.params?.reviewId;
+    const reviewId = req.params.reviewId;
 
     if (!reviewId) {
         throw new ApiError(HTTP_BAD_REQUEST, "Review ID is required");
     }
 
     try {
-        const reviewAggregate = await Review.aggregate([
-            { $match: { _id: mongoose.Types.ObjectId(reviewId) } },
-            {
-                $lookup: {
-                    from: "users",
-                    localField: "userId",
-                    foreignField: "_id",
-                    as: "user",
-                },
-            },
-            {
-                $unwind: "$user",
-            },
-            {
-                $lookup: {
-                    from: "reviewImages",
-                    localField: "_id",
-                    foreignField: "reviewId",
-                    as: "images",
-                },
-            },
-            {
-                $facet: {
-                    reviews: [
-                        {
-                            $project: {
-                                _id: 1,
-                                rating: 1,
-                                comment: 1,
-                                "user.name": 1,
-                                "user.email": 1,
-                                images: { $ifNull: ["$images", []] },
-                            },
-                        },
-                    ],
-                },
-            },
-        ]);
-
-        if (!reviewAggregate || reviewAggregate.length === 0) {
-            throw new ApiError(HTTP_NOT_FOUND, "Review not found");
-        }
-
-        return res
-            .status(HTTP_OK)
-            .json(
-                new ApiResponse(
-                    HTTP_OK,
-                    "Review retrieved successfully",
-                    reviewAggregate[0].reviews
-                )
-            );
-    } catch (error) {
-        throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, error.message);
-    }
-});
-const updateReview = asyncHandler(async (req, res) => {
-    // Get the review ID from the request params
-    // Get the user ID from the request user object
-    // Check if the review exists
-    // Get the review details from the request body
-    // Validate and sanitize the review details
-    // check if the review belongs to the user
-    // Update the review details
-    // Save the updated review to the database
-    // Send the response to the client with the updated review
-    // Handle errors if any occur during the process and send an error response
-
-    const reviewId = req.params?.reviewId;
-    const userId = req.user?._id;
-
-    const { rating, comment } = req.body;
-
-    if (!reviewId) {
-        throw new ApiError(HTTP_BAD_REQUEST, "Review ID is required");
-    }
-
-    if (!userId) {
-        throw new ApiError(HTTP_BAD_REQUEST, "User ID is required");
-    }
-    const reviewUpdate = [];
-    if (rating) {
-        reviewUpdate.push({ rating });
-    }
-    if (comment) {
-        reviewUpdate.push({ comment });
-    }
-
-    try {
-        const review = await Review.findByIdAndUpdate(
-            { reviewId, uploadeby: userId },
-            {
-                ...reviewUpdate,
-            }
+        const review = await reviewService.getReviewById(reviewId);
+        
+        return res.status(HTTP_OK).json(
+            new ApiResponse(
+                HTTP_OK,
+                review,
+                "Review retrieved successfully"
+            )
         );
-
-        if (!review) {
+    } catch (error) {
+        if (error.message === "Review not found") {
             throw new ApiError(HTTP_NOT_FOUND, "Review not found");
         }
-
-        return res
-            .status(HTTP_OK)
-            .json(
-                new ApiResponse(HTTP_OK, "Review updated successfully", review)
-            );
-    } catch (error) {
-        throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, error.message);
+        
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Failed to retrieve review"
+        );
     }
 });
-const deleteReview = asyncHandler(async (req, res) => {
-    // Get the review ID from the request params
-    // Get the user ID from the request user object
-    // Check if the review exists
-    // Check if the review belongs to the user
-    // Delete the review from the database
-    // Send the response to the client with a success message
-    // Handle errors if any occur during the process and send an error response
 
-    const reviewId = req.params?.reviewId;
-    const userId = req.user?._id;
-
+/**
+ * Update an existing review
+ */
+const updateReview = asyncHandler(async (req, res) => {
+    const reviewId = req.params.reviewId;
+    const userId = req.user.id;
+    const { rating, comment, title } = req.body;
+    
     if (!reviewId) {
         throw new ApiError(HTTP_BAD_REQUEST, "Review ID is required");
     }
 
-    if (!userId) {
-        throw new ApiError(HTTP_BAD_REQUEST, "User ID is required");
-    }
-
     try {
-        const review = await Review.findOneAndDelete({
-            _id: reviewId,
-            user: userId,
-        });
-
-        const reviewImage = await ReviewImage.findOneAndDelete({
-            reviewId: reviewId,
-            userId: userId,
-        });
-        if (!review) {
+        const updateData = {};
+        if (rating !== undefined) updateData.rating = rating;
+        if (comment !== undefined) updateData.comment = comment;
+        if (title !== undefined) updateData.title = title;
+        
+        const newImageFiles = req.files?.images || [];
+        const deleteImageIds = req.body.deleteImages || [];
+        
+        const updatedReview = await reviewService.updateReview(
+            reviewId,
+            userId,
+            updateData,
+            newImageFiles,
+            deleteImageIds
+        );
+        
+        return res.status(HTTP_OK).json(
+            new ApiResponse(
+                HTTP_OK,
+                updatedReview,
+                "Review updated successfully"
+            )
+        );
+    } catch (error) {
+        if (error.message === "Review not found") {
             throw new ApiError(HTTP_NOT_FOUND, "Review not found");
         }
-
-        return res
-            .status(HTTP_OK)
-            .json(
-                new ApiResponse(HTTP_OK, "Review deleted successfully", null)
-            );
-    } catch (error) {
-        throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, error.message);
+        
+        if (error.message === "You are not authorized to update this review") {
+            throw new ApiError(HTTP_BAD_REQUEST, error.message);
+        }
+        
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Failed to update review"
+        );
     }
 });
 
-export { createReview, getReviews, getReview, updateReview, deleteReview };
+/**
+ * Delete a review
+ */
+const deleteReview = asyncHandler(async (req, res) => {
+    const reviewId = req.params.reviewId;
+    const userId = req.user.id;
+    const isAdmin = req.user.role === "ADMIN";
+    
+    if (!reviewId) {
+        throw new ApiError(HTTP_BAD_REQUEST, "Review ID is required");
+    }
+
+    try {
+        await reviewService.deleteReview(reviewId, userId, isAdmin);
+        
+        return res.status(HTTP_OK).json(
+            new ApiResponse(
+                HTTP_OK,
+                null,
+                "Review deleted successfully"
+            )
+        );
+    } catch (error) {
+        if (error.message === "Review not found") {
+            throw new ApiError(HTTP_NOT_FOUND, "Review not found");
+        }
+        
+        if (error.message === "You are not authorized to delete this review") {
+            throw new ApiError(HTTP_BAD_REQUEST, error.message);
+        }
+        
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Failed to delete review"
+        );
+    }
+});
+
+/**
+ * Mark a review as helpful
+ */
+const markReviewAsHelpful = asyncHandler(async (req, res) => {
+    const reviewId = req.params.reviewId;
+    
+    if (!reviewId) {
+        throw new ApiError(HTTP_BAD_REQUEST, "Review ID is required");
+    }
+
+    try {
+        const result = await reviewService.markReviewAsHelpful(reviewId);
+        
+        return res.status(HTTP_OK).json(
+            new ApiResponse(
+                HTTP_OK,
+                result,
+                "Review marked as helpful"
+            )
+        );
+    } catch (error) {
+        if (error.message === "Review not found") {
+            throw new ApiError(HTTP_NOT_FOUND, "Review not found");
+        }
+        
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Failed to mark review as helpful"
+        );
+    }
+});
+
+/**
+ * Report a review
+ */
+const reportReview = asyncHandler(async (req, res) => {
+    const reviewId = req.params.reviewId;
+    const { reason } = req.body;
+    
+    if (!reviewId) {
+        throw new ApiError(HTTP_BAD_REQUEST, "Review ID is required");
+    }
+
+    if (!reason) {
+        throw new ApiError(HTTP_BAD_REQUEST, "Report reason is required");
+    }
+
+    try {
+        const result = await reviewService.reportReview(reviewId, reason);
+        
+        return res.status(HTTP_OK).json(
+            new ApiResponse(
+                HTTP_OK,
+                result,
+                "Review reported successfully"
+            )
+        );
+    } catch (error) {
+        if (error.message === "Review not found") {
+            throw new ApiError(HTTP_NOT_FOUND, "Review not found");
+        }
+        
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Failed to report review"
+        );
+    }
+});
+
+/**
+ * Get review statistics for a product
+ */
+const getProductReviewStats = asyncHandler(async (req, res) => {
+    const productId = req.params.productId;
+    
+    if (!productId) {
+        throw new ApiError(HTTP_BAD_REQUEST, "Product ID is required");
+    }
+
+    try {
+        const stats = await reviewService.getProductReviewStats(productId);
+        
+        return res.status(HTTP_OK).json(
+            new ApiResponse(
+                HTTP_OK,
+                stats,
+                "Review statistics retrieved successfully"
+            )
+        );
+    } catch (error) {
+        if (error.message === "Product not found") {
+            throw new ApiError(HTTP_NOT_FOUND, "Product not found");
+        }
+        
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Failed to retrieve review statistics"
+        );
+    }
+});
+
+/**
+ * Admin: Update review status (approve/reject)
+ */
+const updateReviewStatus = asyncHandler(async (req, res) => {
+    const reviewId = req.params.reviewId;
+    const { status } = req.body;
+    
+    // This is an admin-only endpoint
+    if (req.user.role !== "ADMIN") {
+        throw new ApiError(HTTP_BAD_REQUEST, "Only admins can update review status");
+    }
+    
+    if (!reviewId) {
+        throw new ApiError(HTTP_BAD_REQUEST, "Review ID is required");
+    }
+
+    if (!status || !["APPROVED", "REJECTED"].includes(status)) {
+        throw new ApiError(HTTP_BAD_REQUEST, "Valid status (APPROVED/REJECTED) is required");
+    }
+
+    try {
+        const updatedReview = await reviewService.updateReviewStatus(reviewId, status);
+        
+        return res.status(HTTP_OK).json(
+            new ApiResponse(
+                HTTP_OK,
+                updatedReview,
+                `Review ${status.toLowerCase()} successfully`
+            )
+        );
+    } catch (error) {
+        if (error.message === "Review not found") {
+            throw new ApiError(HTTP_NOT_FOUND, "Review not found");
+        }
+        
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Failed to update review status"
+        );
+    }
+});
+
+/**
+ * Admin: Add reply to a review
+ */
+const addReviewReply = asyncHandler(async (req, res) => {
+    const reviewId = req.params.reviewId;
+    const { reply } = req.body;
+    const adminId = req.user.id;
+    
+    // This is an admin-only endpoint
+    if (req.user.role !== "ADMIN") {
+        throw new ApiError(HTTP_BAD_REQUEST, "Only admins can reply to reviews");
+    }
+    
+    if (!reviewId) {
+        throw new ApiError(HTTP_BAD_REQUEST, "Review ID is required");
+    }
+
+    if (!reply) {
+        throw new ApiError(HTTP_BAD_REQUEST, "Reply text is required");
+    }
+
+    try {
+        const updatedReview = await reviewService.addReviewReply(reviewId, adminId, reply);
+        
+        return res.status(HTTP_OK).json(
+            new ApiResponse(
+                HTTP_OK,
+                updatedReview,
+                "Reply added successfully"
+            )
+        );
+    } catch (error) {
+        if (error.message === "Review not found") {
+            throw new ApiError(HTTP_NOT_FOUND, "Review not found");
+        }
+        
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Failed to add reply to review"
+        );
+    }
+});
+
+export { 
+    createReview, 
+    getReviews, 
+    getReview, 
+    updateReview, 
+    deleteReview,
+    markReviewAsHelpful,
+    reportReview,
+    getProductReviewStats,
+    updateReviewStatus,
+    addReviewReply
+};

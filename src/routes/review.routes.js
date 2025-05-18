@@ -5,15 +5,41 @@ import {
     getReview,
     updateReview,
     deleteReview,
+    markReviewAsHelpful,
+    reportReview,
+    getProductReviewStats,
+    updateReviewStatus,
+    addReviewReply
 } from "../controllers/review.controller.js";
-import {verifyToken} from "../middlewares/auth.middleware.js";
+import { authenticate, isAdmin } from "../middlewares/auth.middleware.js";
 
 const router = Router();
 
-router.route("/").get(getReviews);
-router.route("/:reviewId").get(getReview);
-router.route("/create").post(verifyToken, createReview);
-router.route("/update/:reviewId").put(verifyToken, updateReview);
-router.route("/delete/:reviewId").delete(verifyToken, deleteReview);
+// Public routes (no authentication required)
+// Get reviews for a product
+router.get("/product/:productId", getReviews);
+// Get review statistics for a product
+router.get("/product/:productId/stats", getProductReviewStats);
+// Get a specific review
+router.get("/:reviewId", getReview);
+
+// User routes (authentication required)
+router.use(authenticate);
+// Create a new review
+router.post("/", createReview);
+// Update user's own review
+router.put("/:reviewId", updateReview);
+// Delete user's own review
+router.delete("/:reviewId", deleteReview);
+// Mark a review as helpful
+router.post("/:reviewId/helpful", markReviewAsHelpful);
+// Report a review
+router.post("/:reviewId/report", reportReview);
+
+// Admin routes
+// Update review status (approve/reject)
+router.patch("/:reviewId/status", isAdmin, updateReviewStatus);
+// Add admin reply to a review
+router.post("/:reviewId/reply", isAdmin, addReviewReply);
 
 export default router;
