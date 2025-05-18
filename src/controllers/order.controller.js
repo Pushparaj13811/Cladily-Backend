@@ -1,464 +1,322 @@
-import asyncHandler from "../utils/asyncHandler.js";
-import ApiError from "../utils/apiError.js";
-import ApiResponse from "../utils/apiResponse.js";
-import { Order } from "../models/order.model.js";
-import { OrderItem } from "../models/orderItem.model.js";
-import { ShoppingCart } from "../models/shoppingCart.model.js";
-import { Address } from "../models/address.model.js";
-import { Payment } from "../models/payment.model.js";
-import {
-    HTTP_BAD_REQUEST,
-    HTTP_NOT_FOUND,
-    HTTP_OK,
-    HTTP_INTERNAL_SERVER_ERROR,
-    HTTP_UNAUTHORIZED,
-} from "../httpStatusCode.js";
-import {
-    capturePayment,
-    createPaymentOrder,
-    processBankRefund,
-    processRazorpayRefund,
-    processWalletRefund,
-} from "../services/payment.service.js";
+import { prisma } from '../database/connect.js';
+import ApiResponse from '../utils/apiResponse.js';
+import ApiError from '../utils/apiError.js';
+import asyncHandler from '../utils/asyncHandler.js';
+import { OrderService } from '../services/order.service.js';
 
+// Initialize service
+const orderService = new OrderService();
+
+// Create an order from the cart
 const createOrder = asyncHandler(async (req, res) => {
-    // Validate User
-    // Fetch Cart and Shipping Address
-    // Create Order
-    // Create Order Items
-    // Save Order and Order Items
-    // Handle Payment if not Cash On Delivery
-    // Save Payment Details
-    // Rollback Order Creation if Payment Fails
-    // Clear the Cart
-    // Send Response
+  const userId = req.user.id;
+  
+  if (!userId) {
+    throw new ApiError(400, "User ID is required");
+  }
+  
+  const orderData = {
+    ...req.body,
+    ipAddress: req.ip,
+    userAgent: req.headers['user-agent']
+  };
 
-    const userId = req.user?._id;
-    const { paymentMethod } = req.body;
-
-    const isUserVerified = req.user?.emailVerified && req.user?.phoneVerified;
-
-    if (!isUserVerified) {
-        if (!req.user?.emailVerified) {
-            throw new ApiError(HTTP_UNAUTHORIZED, "Please verify your email");
-        } else if (!req.user?.phoneVerified) {
-            throw new ApiError(HTTP_UNAUTHORIZED, "Please verify your email");
-        }
-    }
-    if (!userId) {
-        throw new ApiError(HTTP_UNAUTHORIZED, "Please login to continue");
-    }
-
-    if (!paymentMethod) {
-        throw new ApiError(HTTP_BAD_REQUEST, "Payment method is required");
-    }
-
-    const [cart, shippingAddress] = await Promise.all([
-        ShoppingCart.findOne({ userId }).populate("items.productVarientId"),
-        Address.findOne({ userId }),
-    ]);
-
-    if (!cart || !shippingAddress) {
-        throw new ApiError(
-            HTTP_NOT_FOUND,
-            "Cart or Shipping Address not found"
-        );
-    }
-
-    const order = new Order({
-        userId,
-        shippingAddressId: shippingAddress._id,
-        paymentMethod,
-        totalAmount: cart.totalAmount,
-        status: "Pending",
-    });
-
-    const orderItems = cart.items.map((item) => ({
-        orderId: order._id,
-        productVarientId: item.productVarientId,
-        quantity: item.quantity,
-        price: item.price,
-    }));
-
-    await Promise.all([order.save(), OrderItem.insertMany(orderItems)]);
-
-    if (paymentMethod !== "Cash On Delivery") {
-        try {
-            const paymentOrder = await createPaymentOrder(
-                order._id,
-                cart.totalAmount
-            );
-            const capturedPayment = await capturePayment(
-                paymentOrder.id,
-                cart.totalAmount
-            );
-
-            if (capturedPayment.status !== "captured") {
-                throw new ApiError(
-                    HTTP_INTERNAL_SERVER_ERROR,
-                    "Payment capture failed"
-                );
-            }
-
-            const payment = new Payment({
-                orderId: order._id,
-                amount: cart.totalAmount,
-                status: "Completed",
-                paymentGatewayOrderId: paymentOrder.id,
-                paymentGatewayPaymentId: capturedPayment.id,
-            });
-
-            await payment.save();
-        } catch (error) {
-            await Order.deleteOne({ _id: order._id });
-            throw new ApiError(
-                HTTP_INTERNAL_SERVER_ERROR,
-                `Payment processing failed: ${error.message}`
-            );
-        }
-    } else if (paymentMethod === "Cash On Delivery") {
-        const payment = new Payment({
-            orderId: order._id,
-            amount: cart.totalAmount,
-            status: "Pending",
-            paymentGatewayOrderId: null,
-            paymentGatewayPaymentId: null,
-        });
-
-        await payment.save();
-    }
-
-    await ShoppingCart.findByIdAndUpdate(cart._id, { $set: { items: [] } });
-
-    res.status(HTTP_OK).json(
-        new ApiResponse(HTTP_OK, "Order created successfully", {
-            order,
-            paymentStatus:
-                paymentMethod === "Cash On Delivery" ? "Pending" : "Paid",
-        })
-    );
-});
-
-const getOrders = asyncHandler(async (req, res) => {
-    // Get the user ID from the request object
-    // Fetch all orders for the user from the database and sort them by creation date in descending order
-    // Populate the order items with product details and exclude the user ID and version field
-    // Send the response with the orders
-    // Handle any errors
-
-    const userId = req.user?._id;
-
-    if (!userId) {
-        throw new ApiError(HTTP_UNAUTHORIZED, "Please login to continue");
-    }
-
-    try {
-        const orders = await Order.find({ userId })
-            .sort({ createdAt: -1 })
-            .populate({
-                path: "orderItems",
-                populate: {
-                    path: "productVarientId",
-                    select: "name price",
-                },
-            })
-            .select("-userId -__v");
-
-        res.status(HTTP_OK).json(
-            new ApiResponse(HTTP_OK, "Orders fetched successfully", { orders })
-        );
-    } catch (error) {
-        throw new ApiError(
-            error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
-            error.message || "Internal server error"
-        );
-    }
-});
-
-const updateOrderStatus = asyncHandler(async (req, res) => {
-    // Validate User
-    // Fetch Order
-    // Update Order Status
-    // Send Response
-
-    const sellerId = req.user?._id;
-    const { orderId, status } = req.body;
-
-    if (!sellerId) {
-        throw new ApiError(HTTP_UNAUTHORIZED, "Please login to continue");
-    }
-    if (req.user?.role !== "admin") {
-        throw new ApiError(
-            HTTP_UNAUTHORIZED,
-            "You are not authorized to update order status"
-        );
-    }
-
-    if (!orderId || !status) {
-        throw new ApiError(
-            HTTP_BAD_REQUEST,
-            "Order ID and status are required"
-        );
-    }
-
-    const order = await Order.findOne({ _id: orderId });
-
-    if (!order) {
-        throw new ApiError(HTTP_NOT_FOUND, "Order not found");
-    }
-
-    order.status = status;
-    await order.save();
-
-    res.status(HTTP_OK).json(
-        new ApiResponse(HTTP_OK, "Order status updated successfully", {
-            order,
-        })
-    );
-});
-
-const cancelOrder = asyncHandler(async (req, res) => {
-    const { orderId, reason, role } = req.body;
-    const userId = req.user?._id;
-
-    if (!userId) {
-        throw new ApiError(HTTP_UNAUTHORIZED, "Please login to continue");
-    }
-
-    const order = await Order.findById(orderId);
-    const orderStatus = order.status;
-    if (!order) {
-        throw new ApiError(HTTP_NOT_FOUND, "Order not found");
-    }
-
-    if (role === "buyer" && order.userId.toString() !== userId.toString()) {
-        throw new ApiError(
-            HTTP_FORBIDDEN,
-            "You are not authorized to cancel this order"
-        );
-    }
-
-    if (order.status === "Cancelled") {
-        throw new ApiError(HTTP_BAD_REQUEST, "Order is already cancelled");
-    }
-
-    if (role === "auto" && order.deliveryAttempts >= 3) {
-        order.status = "Cancelled";
-        order.cancellationReason = `Auto-cancelled due to 3 failed delivery attempts`;
-    } else if (role === "buyer") {
-        order.status = "Cancelled";
-        order.cancellationReason = `Cancelled by buyer: ${reason}`;
-    } else if (role === "deliveryPartner") {
-        order.status = "Cancelled";
-        order.cancellationReason = `Cancelled by delivery partner: ${reason}`;
-    } else {
-        throw new ApiError(HTTP_BAD_REQUEST, "Invalid cancellation role");
-    }
-
-    const payment = await Payment.findOne({ orderId: order._id });
-    if (payment && payment.status === "Completed") {
-        const refund = await processRefund(
-            payment.paymentGatewayPaymentId,
-            payment.amount
-        );
-        if (!refund) {
-            order.status = orderStatus;
-            order.cancellationReason = null;
-            throw new ApiError(
-                HTTP_INTERNAL_SERVER_ERROR,
-                "Refund processing failed"
-            );
-        }
-        order.refundStatus = "Processed";
-    }
-
-    await order.save();
-
-    res.status(HTTP_OK).json(
-        new ApiResponse(HTTP_OK, "Order cancelled successfully", {
-            orderId: order._id,
-            status: order.status,
-            cancellationReason: order.cancellationReason,
-            refundStatus: order.refundStatus || "N/A",
-        })
-    );
-});
-
-const cancelOrderItems = asyncHandler(async (req, res) => {
-    const { orderId, itemIds, reason } = req.body;
-    const userId = req.user?._id;
-
-    if (!userId) {
-        throw new ApiError(HTTP_UNAUTHORIZED, "Please login to continue");
-    }
-
-    const order = await Order.findById(orderId);
-    if (!order) {
-        throw new ApiError(HTTP_NOT_FOUND, "Order not found");
-    }
-
-    if (order.userId.toString() !== userId.toString()) {
-        throw new ApiError(
-            HTTP_FORBIDDEN,
-            "You are not authorized to cancel items in this order"
-        );
-    }
-
-    const itemsToCancel = await OrderItem.find({
-        _id: { $in: itemIds },
-        orderId,
-    });
-    if (itemsToCancel.length !== itemIds.length) {
-        throw new ApiError(HTTP_NOT_FOUND, "Some order items not found");
-    }
-
-    await OrderItem.updateMany(
-        { _id: { $in: itemIds } },
-        { $set: { status: "Cancelled", cancellationReason: reason } }
-    );
-
-    const remainingItems = await OrderItem.find({
-        orderId,
-        status: { $ne: "Cancelled" },
-    });
-    if (remainingItems.length === 0) {
-        order.status = "Cancelled";
-        order.cancellationReason = `All items cancelled: ${reason}`;
-    }
-
-    await order.save();
-
-    const payment = await Payment.findOne({ orderId: order._id });
-    if (payment && payment.status === "Completed") {
-        const totalAmountToRefund = await OrderItem.aggregate([
-            { $match: { _id: { $in: itemIds } } },
-            { $group: { _id: null, totalAmount: { $sum: "$price" } } },
-        ]);
-
-        if (totalAmountToRefund.length > 0) {
-            const refund = await processRefund(
-                payment.razorpayPaymentId,
-                totalAmountToRefund[0].totalAmount
-            );
-            if (!refund) {
-                throw new ApiError(
-                    HTTP_INTERNAL_SERVER_ERROR,
-                    "Refund processing failed"
-                );
-            }
-            order.refundStatus = "Processed";
-        }
-    }
-
-    res.status(HTTP_OK).json(
-        new ApiResponse(HTTP_OK, "Order items cancelled successfully", {
-            orderId: order._id,
-            status: order.status,
-            cancellationReason: order.cancellationReason,
-            refundStatus: order.refundStatus || "N/A",
-        })
-    );
-});
-
-const returnProduct = asyncHandler(async (req, res) => {
-    const userId = req.user?._id;
-
-    if (!userId) {
-        throw new ApiError(HTTP_UNAUTHORIZED, "Please login to continue");
-    }
-
-    const {
-        productVarientId,
-        reason,
-        orderId,
-        refundMethod,
-        refundType,
-        bankDetails,
-    } = req.body;
-
-    // Validate input fields
-    if (!productVarientId || !reason || !orderId || !refundMethod) {
-        throw new ApiError(
-            HTTP_BAD_REQUEST,
-            "Product variant ID, reason, order ID, and refund method are required"
-        );
-    }
-
-    // Fetch the order item and validate it
-    const orderItem = await OrderItem.findOne({
-        orderId,
-        productVarientId,
-        status: "Delivered",
-        updatedAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }, // Delivered within the last 7 days
-    });
-
-    if (!orderItem) {
-        throw new ApiError(
-            HTTP_NOT_FOUND,
-            "Order item not found or not eligible for return"
-        );
-    }
-
-    let responseMessage;
-
-    // Process the return based on the refund method
-    if (refundMethod === "refund") {
-        switch (refundType) {
-            case "razorpay":
-                try {
-                    const paymentId = orderItem.paymentId;
-                    await processRazorpayRefund(paymentId, orderItem.price);
-                    responseMessage = "Refund processed via Razorpay.";
-                } catch (error) {
-                    throw new ApiError(
-                        HTTP_INTERNAL_SERVER_ERROR,
-                        `Razorpay refund failed: ${error.message}`
-                    );
-                }
-                break;
-            case "bank":
-                if (!bankDetails || !bankDetails.upiId) {
-                    throw new ApiError(
-                        HTTP_BAD_REQUEST,
-                        "UPI ID is required for bank transfer"
-                    );
-                }
-                await processBankRefund(userId, orderItem, bankDetails);
-                responseMessage = "Refund processed via UPI bank transfer.";
-                break;
-            case "wallet":
-                await processWalletRefund(userId, orderItem);
-                responseMessage = "Refund processed to wallet.";
-                break;
-            default:
-                throw new ApiError(
-                    HTTP_BAD_REQUEST,
-                    "Invalid refund type specified"
-                );
-        }
-    } else if (refundMethod === "replacement") {
-        // Placeholder for replacement logic
-        // Example: await processReplacement(orderItem);
-        responseMessage = "Replacement processed.";
-    } else {
-        throw new ApiError(HTTP_BAD_REQUEST, "Invalid refund method specified");
-    }
-
-    // Update the order item status to Returned
-    orderItem.status = "Returned";
-    await orderItem.save();
-
-    // Send the response
+  try {
+    const result = await orderService.createOrder(userId, orderData);
+    
     return res
-        .status(HTTP_OK)
-        .json(new ApiResponse(HTTP_OK, responseMessage, orderItem));
+      .status(201)
+      .json(
+        new ApiResponse(
+          201,
+          result,
+          "Order created successfully"
+        )
+      );
+  } catch (error) {
+    throw new ApiError(400, error.message || "Failed to create order");
+  }
+});
+
+// Get all orders for a user
+const getAllOrders = asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  
+  if (!userId) {
+    throw new ApiError(400, "User ID is required");
+  }
+
+  const { page = 1, limit = 10, status } = req.query;
+  const options = {
+    page: parseInt(page, 10),
+    limit: parseInt(limit, 10),
+    status
+  };
+  
+  const result = await orderService.getUserOrders(userId, options);
+  
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      result,
+      "Orders fetched successfully"
+    )
+  );
+});
+
+// Get order by ID
+const getOrderById = asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const { orderId } = req.params;
+  
+  if (!orderId) {
+    throw new ApiError(400, "Order ID is required");
+  }
+  
+  try {
+    const order = await orderService.getOrderDetails(orderId, userId);
+    
+    return res.status(200).json(
+      new ApiResponse(
+        200,
+        order,
+        "Order fetched successfully"
+      )
+    );
+  } catch (error) {
+    throw new ApiError(404, error.message || "Order not found");
+  }
+});
+
+// Update order status
+const updateOrderStatus = asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const { orderId } = req.params;
+  const { status } = req.body;
+  
+  if (!orderId) {
+    throw new ApiError(400, "Order ID is required");
+  }
+  
+  if (!status) {
+    throw new ApiError(400, "Status is required");
+  }
+  
+  // Check if user is admin (add your admin check logic here)
+  const isAdmin = req.user.role === "ADMIN";
+  
+  try {
+    const updatedOrder = await orderService.updateOrderStatus(orderId, status, userId, isAdmin);
+    
+    return res.status(200).json(
+      new ApiResponse(
+        200,
+        updatedOrder,
+        "Order status updated successfully"
+      )
+    );
+  } catch (error) {
+    throw new ApiError(400, error.message || "Failed to update order status");
+  }
+});
+
+// Cancel an order
+const cancelOrder = asyncHandler(async (req, res) => {
+  const userId = req.user.id;
+  const { orderId } = req.params;
+  const { reason } = req.body;
+
+  if (!orderId) {
+    throw new ApiError(400, "Order ID is required");
+  }
+  
+  // Check if user is admin (add your admin check logic here)
+  const isAdmin = req.user.role === "ADMIN";
+  
+  try {
+    const result = await orderService.cancelOrder(orderId, userId, reason, isAdmin);
+    
+    return res.status(200).json(
+      new ApiResponse(
+        200,
+        result,
+        "Order canceled successfully"
+      )
+    );
+  } catch (error) {
+    throw new ApiError(400, error.message || "Failed to cancel order");
+  }
+});
+
+// Cancel order items
+const cancelOrderItems = asyncHandler(async (req, res) => {
+  // This functionality can be implemented in the order service
+  // For now, we'll keep the existing implementation
+  
+  const { orderId } = req.params;
+  const { items, reason } = req.body;
+  const userId = req.user.id;
+
+  if (!orderId) {
+    throw new ApiError(400, "Order ID is required");
+  }
+
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    throw new ApiError(400, "Items array is required");
+  }
+
+  // Fetch the order
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: {
+      items: true,
+      payments: true
+    }
+  });
+
+  if (!order) {
+    throw new ApiError(404, "Order not found");
+  }
+
+  // Check if user is authorized to cancel this order
+  const isAdmin = req.user.role === "ADMIN";
+  if (!isAdmin && order.userId !== userId) {
+    throw new ApiError(403, "You are not authorized to cancel this order");
+  }
+
+  // Check if order is in a state that allows cancellations
+  const cancelableStatuses = ["PENDING", "PROCESSING", "ON_HOLD"];
+  if (!cancelableStatuses.includes(order.status)) {
+    throw new ApiError(400, `Cannot cancel items for an order in ${order.status} status`);
+  }
+
+  // Verify all items exist in the order
+  const orderItemIds = order.items.map(item => item.id);
+  for (const itemId of items) {
+    if (!orderItemIds.includes(itemId)) {
+      throw new ApiError(400, `Item ${itemId} does not exist in this order`);
+    }
+  }
+
+  // Get the items to be canceled
+  const itemsToCancel = order.items.filter(item => items.includes(item.id));
+  const totalRefundAmount = itemsToCancel.reduce((sum, item) => sum + parseFloat(item.total), 0);
+
+  let refund = null;
+  const completedPayment = order.payments.find(p => p.status === "PAID");
+
+  // Process refund if payment has been made
+  if (completedPayment && totalRefundAmount > 0) {
+    refund = await prisma.refund.create({
+      data: {
+        orderId: order.id,
+        amount: totalRefundAmount,
+        reason: reason || "Items canceled by user",
+        status: "PENDING",
+        notes: `Refund initiated for canceled items`
+      }
+    });
+  }
+
+  // Update order items
+  const updatedItems = await Promise.all(
+    itemsToCancel.map(item =>
+      prisma.orderItem.update({
+        where: { id: item.id },
+        data: {
+          status: "CANCELED",
+          canceledAt: new Date(),
+          metadata: {
+            ...(item.metadata || {}),
+            cancelReason: reason || "Canceled by user",
+            refundId: refund?.id
+          }
+        }
+      })
+    )
+  );
+
+  // Update the order's total and refunded amount
+  const updatedOrder = await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      refundedAmount: {
+        increment: totalRefundAmount
+      }
+    },
+    include: {
+      items: true
+    }
+  });
+
+  // If all items are canceled, update the order status to canceled
+  const allItemsCanceled = updatedOrder.items.every(item => item.status === "CANCELED");
+  if (allItemsCanceled) {
+    await prisma.order.update({
+      where: { id: orderId },
+      data: {
+        status: "CANCELED",
+        cancelReason: reason || "All items canceled",
+        canceledAt: new Date()
+      }
+    });
+  }
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        updatedItems,
+        refund,
+        totalRefundAmount
+      },
+      "Order items canceled successfully"
+    )
+  );
+});
+
+// Process a return for a product
+const returnProduct = asyncHandler(async (req, res) => {
+  const { orderItemId } = req.params;
+  const { reason, refundMethod } = req.body;
+  const userId = req.user.id;
+
+  if (!orderItemId) {
+    throw new ApiError(400, "Order item ID is required");
+  }
+
+  if (!reason) {
+    throw new ApiError(400, "Reason is required");
+  }
+
+  if (!refundMethod) {
+    throw new ApiError(400, "Refund method is required");
+  }
+
+  try {
+    const result = await orderService.processReturn(orderItemId, userId, {
+      reason,
+      refundMethod
+    });
+    
+    return res.status(200).json(
+      new ApiResponse(
+        200,
+        result,
+        "Return processed successfully"
+      )
+    );
+  } catch (error) {
+    throw new ApiError(400, error.message || "Failed to process return");
+  }
 });
 
 export {
-    createOrder,
-    getOrders,
-    updateOrderStatus,
-    cancelOrder,
-    cancelOrderItems,
-    returnProduct,
+  createOrder,
+  getAllOrders,
+  getOrderById,
+  updateOrderStatus,
+  cancelOrder,
+  cancelOrderItems,
+  returnProduct
 };
