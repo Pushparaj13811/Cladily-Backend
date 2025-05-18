@@ -18,6 +18,14 @@ import cartRouter from "./routes/cart.routes.js";
 import salesRouter from "./routes/sales.routes.js";
 import addressRouter from "./routes/address.routes.js";
 
+// Import rate limiting middleware and configurations
+import { rateLimiter } from "./middlewares/rateLimiter.middleware.js";
+import { 
+  GLOBAL_LIMITS, 
+  PUBLIC_API_LIMITS, 
+  AUTH_LIMITS 
+} from "./utils/rateLimitWindows.js";
+
 config();
 
 const app = express();
@@ -44,21 +52,29 @@ app.use(
     })
 );
 
-// Routes
-app.use("/api/auth", authRouter);
-app.use("/api/products", productRouter);
-app.use("/api/users", userRouter);
-app.use("/api/categories", categoryRouter);
-app.use("/api/reviews", reviewRouter);
-app.use("/api/coupons", couponRouter);
-app.use("/api/orders", orderRouter);
-app.use("/api/wishlist", wishlistRouter);
-app.use("/api/cart", cartRouter);
-app.use("/api/sales", salesRouter);
-app.use("/api/addresses", addressRouter);
+// Apply global rate limiting to all routes
+app.use(rateLimiter(GLOBAL_LIMITS.DEFAULT));
+
+// Health check endpoint (not rate limited)
+app.get("/api/health", (req, res) => {
+    res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// Routes with specific rate limits
+app.use("/api/auth", rateLimiter(AUTH_LIMITS.STANDARD), authRouter);
+app.use("/api/products", rateLimiter(PUBLIC_API_LIMITS.HIGH_VOLUME), productRouter);
+app.use("/api/users", rateLimiter(PUBLIC_API_LIMITS.STANDARD), userRouter);
+app.use("/api/categories", rateLimiter(PUBLIC_API_LIMITS.HIGH_VOLUME), categoryRouter);
+app.use("/api/reviews", rateLimiter(PUBLIC_API_LIMITS.STANDARD), reviewRouter);
+app.use("/api/coupons", rateLimiter(PUBLIC_API_LIMITS.STANDARD), couponRouter);
+app.use("/api/orders", rateLimiter(PUBLIC_API_LIMITS.STANDARD), orderRouter);
+app.use("/api/wishlist", rateLimiter(PUBLIC_API_LIMITS.STANDARD), wishlistRouter);
+app.use("/api/cart", rateLimiter(PUBLIC_API_LIMITS.STANDARD), cartRouter);
+app.use("/api/sales", rateLimiter(PUBLIC_API_LIMITS.STANDARD), salesRouter);
+app.use("/api/addresses", rateLimiter(PUBLIC_API_LIMITS.STANDARD), addressRouter);
 
 // Root endpoint
-app.get("/", (req, res) => {
+app.get("/", rateLimiter(PUBLIC_API_LIMITS.RELAXED), (req, res) => {
     res.send("Hello from the Cladily API!");
 });
 

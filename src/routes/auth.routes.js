@@ -8,6 +8,8 @@ import {
   refreshAccessToken,
 } from '../controllers/auth.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
+import { rateLimiter } from '../middlewares/rateLimiter.middleware.js';
+import { AUTH_LIMITS } from '../utils/rateLimitWindows.js';
 
 const router = express.Router();
 
@@ -16,28 +18,28 @@ const router = express.Router();
  * @desc Register a new user
  * @access Public
  */
-router.post('/register', register);
+router.post('/register', rateLimiter(AUTH_LIMITS.SIGNUP), register);
 
 /**
  * @route POST /api/auth/login
  * @desc Login with phone and password
  * @access Public
  */
-router.post('/login', loginWithPassword);
+router.post('/login', rateLimiter(AUTH_LIMITS.LOGIN), loginWithPassword);
 
 /**
  * @route POST /api/auth/request-otp
  * @desc Request OTP for login/registration
  * @access Public
  */
-router.post('/request-otp', requestOtp);
+router.post('/request-otp', rateLimiter(AUTH_LIMITS.OTP), requestOtp);
 
 /**
  * @route POST /api/auth/verify-otp
  * @desc Verify OTP and login
  * @access Public
  */
-router.post('/verify-otp', verifyOtp);
+router.post('/verify-otp', rateLimiter(AUTH_LIMITS.OTP), verifyOtp);
 
 /**
  * @route POST /api/auth/logout
@@ -51,6 +53,6 @@ router.post('/logout', authenticate, logout);
  * @desc Refresh access token
  * @access Public
  */
-router.post('/refresh-token', refreshAccessToken);
+router.post('/refresh-token', rateLimiter(AUTH_LIMITS.STANDARD), refreshAccessToken);
 
 export default router; 
