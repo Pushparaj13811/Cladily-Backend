@@ -11,19 +11,13 @@ import {
     HTTP_INTERNAL_SERVER_ERROR,
 } from "../httpStatusCode.js";
 import ApiResponse from "../utils/apiResponse.js";
-import { User } from "../models/user.model.js";
-import { Address } from "../models/address.model.js";
-import sendVerificationEmail from "../services/sendVerificationEmail.service.js";
-import sendWelcomeEmail from "../services/sendWelcomeEmail.service.js";
-import sendResetPasswordEmail from "../services/sendResetPasswordEmail.service.js";
 import mongoose from "mongoose";
 import sendVerificationCode from "../services/sendVerificationCode.service.js";
-
-const userNameGenerator = (firstName, lastName) => {
-    const random = Math.floor(Math.random() * 1000);
-    const username = `${firstName.toLowerCase()}${lastName.toLowerCase()}${random}`;
-    return username.toLowerCase();
-};
+import { UserService } from "../services/user.service.js";
+import { EmailService } from "../services/email.service.js";
+import { OtpService } from "../services/otp.service.js";
+import { AuthService } from "../services/auth.service.js";
+import { prisma } from "../database/connect.js";
 
 const options = {
     httpOnly: true,
@@ -43,218 +37,188 @@ const cleanUserObject = (user) => {
     return userObject;
 };
 
+// Initialize services
+const userService = new UserService();
+const emailService = new EmailService();
+const otpService = new OtpService();
+const authService = new AuthService();
+
 const registerUser = asyncHandler(async (req, res) => {
-    // Get username, email, password, firstName, lastName, gender, phone, dateOfBirth, role from req.body
-    // Get guestCartId from req.body
-    // Validate if all data are provided
-    // Check if the user already exists in the database
-    // If the user exists, throw an error "User already exists"
-    // Create a new user
-    // if guestCartId exists, find the cart by the guestCartId
-    // if the cart exists, transfer the cart to the user
-    // Clear the guestCartId cookie
-    // if the cart does not exist, create a new cart for the user
-    // Generate an auth token
-    // Save the user to the database
-    // Send the response with the user and auth token
-    // Catch any error and pass it to the error handler
-
-    const { email, password, firstName, lastName, mobile } = req.body;
-    let role = req.body?.role;
-
+    const { email, phoneNumber, password, firstName, lastName } = req.body;
     const { guestCartId } = req.cookies;
-
-    if (!email || !password || !firstName || !lastName || !mobile) {
-        throw new ApiError(
-            HTTP_BAD_REQUEST,
-            "Please provide all required fields"
-        );
+    
+    if (!email || !password || !firstName || !lastName) {
+        throw new ApiError(HTTP_BAD_REQUEST, "Please provide all required fields");
     }
-    if (!role) {
-        role = "user";
-    }
-    const existedUser = await User.findOne({ email });
-
-    if (existedUser) {
-        throw new ApiError(
-            HTTP_BAD_REQUEST,
-            "User with username or email already exists"
-        );
-    }
-    const username = userNameGenerator(firstName, lastName);
 
     try {
-        const user = await User.create({
-            username,
+        // Register the user through service
+        const user = await authService.registerUser({
             email,
+            phoneNumber,
             password,
             firstName,
             lastName,
-            role,
-            phone: mobile,
-            usedCoupons: [],
         });
 
-        console.log(user);
-
-        const createdUser = await User.findById(user._id).select(
-            "-password -usedCoupons -emailVerificationToken -emailVerificationTokenExpires"
-        );
-
-        if (!createdUser) {
-            throw new ApiError(
-                HTTP_INTERNAL_SERVER_ERROR,
-                "Error creating user"
-            );
-        }
-
+        // Transfer guest cart if it exists
         if (guestCartId) {
-            const cart = await SchoppingCart.findOne({ _id: guestCartId });
-            if (cart) {
-                cart.userId = createdUser._id;
-                await cart.save();
+            try {
+                // Find guest cart
+                const guestCart = await prisma.cart.findUnique({
+                    where: { id: guestCartId }
+                });
+                
+                if (guestCart) {
+                    // Get items from guest cart
+                    const cartItems = await prisma.cartItem.findMany({
+                        where: { cartId: guestCartId }
+                    });
+                    
+                    // Find user cart
+                    const userCart = await prisma.cart.findFirst({
+                        where: { userId: user.id }
+                    });
+                    
+                    // Transfer items to user cart
+                    if (userCart && cartItems.length > 0) {
+                        for (const item of cartItems) {
+                            await prisma.cartItem.create({
+                                data: {
+                                    cartId: userCart.id,
+                                    productId: item.productId,
+                                    variantId: item.variantId,
+                                    quantity: item.quantity,
+                                    price: item.price,
+                                    totalPrice: item.totalPrice
+                                }
+                            });
+                        }
+                        
+                        // Update cart totals
+                        await prisma.cart.update({
+                            where: { id: userCart.id },
+                            data: {
+                                subtotal: guestCart.subtotal,
+                                total: guestCart.total,
+                                itemCount: guestCart.itemCount,
+                                discountTotal: guestCart.discountTotal,
+                            }
+                        });
+                        
+                        // Delete guest cart items
+                        await prisma.cartItem.deleteMany({
+                            where: { cartId: guestCartId }
+                        });
+                        
+                        // Delete guest cart
+                        await prisma.cart.delete({
+                            where: { id: guestCartId }
+                        });
+                    }
+                }
+                
+                // Clear guest cart cookie
+                res.clearCookie("guestCartId", options);
+            } catch (cartError) {
+                console.error("Error transferring guest cart:", cartError);
+                // Don't throw error here, just log it - user registration succeeded
             }
-            res.clearCookie("guestCartId", options);
         }
 
-        await SchoppingCart.create({
-            userId: createdUser._id,
-        });
-        const authToken = createdUser.generateAuthToken();
-        createdUser.authToken = authToken;
-        await createdUser.save();
+        // Generate verification token and send email
+        const verificationToken = await userService.generateEmailVerificationToken(user.id);
+        await emailService.sendVerificationEmail(user, verificationToken);
+        
+        // For phone verification
+        if (user.phoneNumber) {
+            try {
+                const { otp } = await otpService.generateOTP(user.phoneNumber);
+                await otpService.sendOtpSms(user.phoneNumber, otp);
+            } catch (otpError) {
+                console.error("Error sending OTP:", otpError);
+                // Don't throw error here, just log it - user registration succeeded
+            }
+        }
 
-        const verificationToken = createdUser.generateVerificationToken();
-        await createdUser.save();
-
-        // Send verification email
-        await sendVerificationCode(createdUser.phone);
-
-        await sendVerificationEmail(createdUser, verificationToken);
+        // Generate tokens for authentication
+        const { accessToken, refreshToken } = authService.generateTokens(user);
+        
+        // Create session for the user
+        await authService.createSession(user.id, refreshToken);
+        
+        // Set refresh token in cookie
+        res.cookie('refreshToken', refreshToken, options);
 
         return res
             .status(HTTP_CREATED)
             .json(
-                new ApiResponse(
-                    HTTP_CREATED,
-                    "User created successfully",
-                    createdUser
-                )
+                new ApiResponse(HTTP_CREATED, "User registered successfully", {
+                    user,
+                    accessToken
+                })
             );
     } catch (error) {
-        throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, error.message);
+        throw new ApiError(
+            HTTP_BAD_REQUEST,
+            error.message || "Error registering user"
+        );
     }
 });
 
 const verifyEmail = asyncHandler(async (req, res) => {
-    // Get the verification token from req.params
-    // Validate and sanitize the verification token
-    // Find the user by the verification token
-    // If the user does not exist, throw an error "Invalid or expired verification token"
-    // Check if the verification token has expired
-    // If the verification token has expired, throw an error "Verification token has expired"
-    // Update the user's emailVerified to true
-    // Send the response with the message "Email verified successfully"
-    // Send the welcome email
-    // Catch any error and pass it to the error handler
-
     const token = req.params?.token || req.query?.token;
-    console.log(token);
 
     if (!token) {
         throw new ApiError(HTTP_BAD_REQUEST, "Verification token is required");
     }
 
     try {
-        // Find the user by verification token and update the emailVerified status
-        const user = await User.findOneAndUpdate(
-            {
-                emailVerificationToken: token,
-                emailVerificationTokenExpires: { $gt: Date.now() },
-            },
-            {
-                emailVerified: true,
-                emailVerificationToken: null,
-                emailVerificationTokenExpires: null,
-            },
-            { new: true } // Return the updated document
-        );
-
-        if (!user) {
-            throw new ApiError(
-                HTTP_BAD_REQUEST,
-                "Invalid or expired verification token"
-            );
-        }
-
+        const user = await userService.verifyEmail(token);
+        
         // Send welcome email
-
-        await sendWelcomeEmail(user);
+        await emailService.sendWelcomeEmail(user);
 
         return res
             .status(HTTP_OK)
-            .json(
-                new ApiResponse(HTTP_OK, "Email verified successfully", null)
-            );
+            .json(new ApiResponse(HTTP_OK, "Email verified successfully", null));
     } catch (error) {
-        throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, error.message);
+        if (error.message.includes('Invalid or expired verification token')) {
+            throw new ApiError(HTTP_BAD_REQUEST, error.message);
+        }
+        
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Error verifying email"
+        );
     }
 });
 
 const resendVerificationEmail = asyncHandler(async (req, res) => {
-    // Get the userid from req.user
-    // Find the user by the userid
-    // If the user does not exist, throw an error "User does not exist"
-    // Generate a new verification token
-    // Save the new verification token to the database
-    // Send the verification email
-    // Send the response with the message "Verification email sent successfully"
-    // Catch any error and pass it to the error handler
-
-    const userId = req.user._id;
+    const userId = req.user.id;
 
     try {
-        const user = await User.findById(userId);
-
-        if (!user) {
-            throw new ApiError(HTTP_NOT_FOUND, "User does not exist");
-        }
-
-        if (user.emailVerified) {
-            throw new ApiError(HTTP_BAD_REQUEST, "Email already verified");
-        }
-        const verificationToken = user.generateVerificationToken();
-        user.emailVerificationToken = verificationToken;
-        await user.save();
-
-        // Send verification email
-
-        await sendVerificationEmail(user, verificationToken);
+        const verificationToken = await userService.generateEmailVerificationToken(userId);
+        const user = await userService.getUserProfile(userId);
+        
+        await emailService.sendVerificationEmail(user, verificationToken);
 
         return res
             .status(HTTP_OK)
-            .json(
-                new ApiResponse(
-                    HTTP_OK,
-                    "Verification email sent successfully",
-                    null
-                )
-            );
+            .json(new ApiResponse(HTTP_OK, "Verification email sent successfully", null));
     } catch (error) {
-        throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, error.message);
+        if (error.message === 'Email already verified') {
+            throw new ApiError(HTTP_BAD_REQUEST, error.message);
+        }
+        
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Error sending verification email"
+        );
     }
 });
 
 const loginUser = asyncHandler(async (req, res) => {
-    // Get email and password from req.body
-    // Validate if all data are provided
-    // Check if the user exists in the database
-    // If the user does not exist, throw an error "User does not exist"
-    // Check if the password is correct
-    // If the password is incorrect, throw an error "Incorrect password"
-    // send the response with the user and auth token
-    // Catch any error and pass it to the error handler
-
     const { email, password } = req.body;
 
     if (!email || !password) {
@@ -295,10 +259,6 @@ const loginUser = asyncHandler(async (req, res) => {
 });
 
 const logoutUser = asyncHandler(async (req, res) => {
-    // Clear cookies
-    // Send the response with the message "User logged out successfully"
-    // Catch any error and pass it to the error handler
-
     try {
         return res
             .clearCookie("authToken", options)
@@ -359,17 +319,8 @@ const resendVerificationCode = asyncHandler(async (req, res) => {
         throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, error.message);
     }
 });
-const changeCurrentPassword = asyncHandler(async (req, res) => {
-    // Get current password, new password, and confirm new password from req.body
-    // Validate and sanitize all data provided
-    // Check if the new password and confirm new password match
-    // If the new password and confirm new password do not match, throw an error "Passwords do not match"
-    // Check if the current password is correct
-    // If the current password is incorrect, throw an error "Incorrect password"
-    // Update the user's password
-    // Send the response with the message "Password changed successfully"
-    // Catch any error and pass it to the error handler
 
+const changeCurrentPassword = asyncHandler(async (req, res) => {
     const { currentPassword, newPassword, confirmNewPassword } = req.body;
 
     if (!currentPassword || !newPassword || !confirmNewPassword) {
@@ -405,76 +356,44 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
 });
 
 const forgotPassword = asyncHandler(async (req, res) => {
-    // Get email from req.body
-    // Validate and sanitize the email
-    // Check if the user exists in the database
-    // If the user does not exist, throw an error "User does not exist"
-    // Generate a reset token
-    // Save the reset token to the database
-    // Send an email to the user with the reset token
-    // Send the response with the message "Reset token sent successfully"
-    // Catch any error and pass it to the error handler
-
     const { email } = req.body;
 
     if (!email) {
-        throw new ApiError(
-            HTTP_BAD_REQUEST,
-            "Please provide all required fields"
-        );
+        throw new ApiError(HTTP_BAD_REQUEST, "Email is required");
     }
 
     try {
-        const user = await User.findOne({ email });
+        // Find user and generate reset token
+        const user = await prisma.user.findUnique({ where: { email } });
+        
         if (!user) {
-            throw new ApiError(HTTP_NOT_FOUND, "User does not exist");
+            // Don't reveal if email exists for security reasons
+            return res
+                .status(HTTP_OK)
+                .json(new ApiResponse(HTTP_OK, "If your email is registered, you will receive a password reset link", null));
         }
-
-        const resetToken = user.generateResetToken();
-
-        user.resetToken = resetToken;
-        user.resetTokenExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
-        await user.save();
-
-        // Send email with reset token
-
-        await sendResetPasswordEmail(email, resetToken);
+        
+        const resetToken = await userService.generateResetToken(email);
+        
+        // Send password reset email
+        await emailService.sendResetPasswordEmail(user, resetToken);
 
         return res
             .status(HTTP_OK)
-            .json(
-                new ApiResponse(
-                    HTTP_OK,
-                    "Reset password email sent successfully",
-                    null
-                )
-            );
+            .json(new ApiResponse(HTTP_OK, "If your email is registered, you will receive a password reset link", null));
     } catch (error) {
-        throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, error.message);
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Error processing password reset request"
+        );
     }
 });
 
 const resetPassword = asyncHandler(async (req, res) => {
-    // Get the reset token, new password, and confirm new password from req.body
-    // Validate and sanitize all data provided
-    // Check if the new password and confirm new password match
-    // If the new password and confirm new password do not match, throw an error "Passwords do not match"
-    // Find the user by the reset token
-    // If the user does not exist, throw an error "Invalid or expired reset token"
-    // Check if the reset token has expired
-    // If the reset token has expired, throw an error "Reset token has expired"
-    // Update the user's password
-    // Send the response with the message "Password reset successfully"
-    // Catch any error and pass it to the error handler
+    const { token, newPassword, confirmNewPassword } = req.body;
 
-    const resetToken = req.query?.token;
-    const { newPassword, confirmNewPassword } = req.body;
-
-    if (!resetToken || !newPassword || !confirmNewPassword) {
-        throw new ApiError(
-            HTTP_BAD_REQUEST,
-            "Please provide all required fields"
-        );
+    if (!token || !newPassword || !confirmNewPassword) {
+        throw new ApiError(HTTP_BAD_REQUEST, "All fields are required");
     }
 
     if (newPassword !== confirmNewPassword) {
@@ -482,134 +401,68 @@ const resetPassword = asyncHandler(async (req, res) => {
     }
 
     try {
-        const user = await User.findOneAndUpdate(
-            {
-                resetToken,
-                resetTokenExpires: { $gt: Date.now() },
-            },
-            {
-                resetToken: null,
-                resetTokenExpires: null,
-            },
-            { new: true }
-        );
-
-        if (!user) {
-            throw new ApiError(
-                HTTP_BAD_REQUEST,
-                "Invalid or expired reset token"
-            );
-        }
-
-        user.password = newPassword;
-        await user.save({ validateBeforeSave: false });
+        await userService.resetPassword(token, newPassword);
 
         return res
             .status(HTTP_OK)
-            .json(
-                new ApiResponse(HTTP_OK, "Password reset successfully", null)
-            );
+            .json(new ApiResponse(HTTP_OK, "Password reset successfully", null));
     } catch (error) {
-        throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, error.message);
+        if (error.message.includes('Invalid or expired reset token')) {
+            throw new ApiError(HTTP_BAD_REQUEST, error.message);
+        }
+        
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Error resetting password"
+        );
     }
 });
 
 const getUserProfile = asyncHandler(async (req, res) => {
-    // Get the user from req.user
-    // Send the response with the user
-    // Catch any error and pass it to the error handler
-
     try {
-        const userDetails = await redisClient.get("user");
-        let user;
-
-        if (userDetails) {
-            user = JSON.parse(userDetails);
-        } else {
-            const userResponse = req.user;
-            user = await cleanUserObject(userResponse);
-            
-            redisClient.set("user", JSON.stringify(user));
-        }
+        const userId = req.user.id;
+        const user = await userService.getUserProfile(userId);
 
         return res
             .status(HTTP_OK)
-            .json(new ApiResponse(HTTP_OK, "User profile", user));
+            .json(new ApiResponse(HTTP_OK, "User profile retrieved successfully", user));
     } catch (error) {
-        throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, error.message);
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Error retrieving user profile"
+        );
     }
 });
 
 const updateUserProfile = asyncHandler(async (req, res) => {
-    // Get the user data from req.body
-    // Validate and sanitize the user data
-    // Get the user from req.user
-    // Get the user id from req.user
-    // Check if the user exists in the database
-    // If the user does not exist, throw an error "User does not exist"
-    // Update the user data
-    // Save the user data
-    // Send the response with the updated user data
-    // Catch any error and pass it to the error handler
+    const userId = req.user.id;
+    const { firstName, lastName, phoneNumber, profileImage, dateOfBirth } = req.body;
 
-    const { firstName, lastName, gender, phone, dateOfBirth } = req.body;
-    if (!firstName || !lastName || !gender || !phone || !dateOfBirth) {
-        throw new ApiError(
-            HTTP_BAD_REQUEST,
-            "Please provide all required fields"
-        );
+    if (!firstName || !lastName) {
+        throw new ApiError(HTTP_BAD_REQUEST, "First name and last name are required");
     }
 
-    const userId = req.user._id;
-
     try {
-        const user = await User.findByIdAndUpdate(
-            { _id: userId },
-            {
-                firstName,
-                lastName,
-                gender,
-                phone,
-                dateOfBirth,
-            },
-            {
-                new: true,
-                runValidators: true,
-            }
-        );
-
-        if (!user) {
-            throw new ApiError(
-                HTTP_UNAUTHORIZED,
-                "Not authorized to update user"
-            );
-        }
-        const resUser = cleanUserObject(user);
+        const updatedUser = await userService.updateUserProfile(userId, {
+            firstName,
+            lastName,
+            phoneNumber,
+            profileImage,
+            dateOfBirth,
+        });
 
         return res
             .status(HTTP_OK)
-            .json(
-                new ApiResponse(HTTP_OK, "User updated successfully", resUser)
-            );
+            .json(new ApiResponse(HTTP_OK, "User profile updated successfully", updatedUser));
     } catch (error) {
-        throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, error.message);
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Error updating user profile"
+        );
     }
 });
 
 const updateUsername = asyncHandler(async (req, res) => {
-    // Get the username from req.body
-    // Validate and sanitize the username
-    // Get the user from req.user
-    // Get the user id from req.user
-    // Check if the user exists in the database
-    // If the user does not exist, throw an error "User does not exist"
-    // Check if the username already exists in the database
-    // If the username exists, throw an error "Username already exists"
-    // Update the username
-    // Save the user data
-    // Send the response with the updated user data
-    // Catch any error and pass it to the error handler
-
     const { username } = req.body;
 
     if (!username) {
@@ -662,125 +515,63 @@ const updateUsername = asyncHandler(async (req, res) => {
 });
 
 const updateUserAddress = asyncHandler(async (req, res) => {
-    // Get the address data from req.body
-    // Validate and sanitize the address data
-    // Get the user from req.user
-    // Get the user id from req.user
-    // Update the address table with the address data
-    // Update the user with the address id
-    // Save the user data
-    // Send the response with the updated user data
-    // Catch any error and pass it to the error handler
-
     const userId = req.user._id;
-    if (!userId) {
-        throw new ApiError(
-            HTTP_UNAUTHORIZED,
-            "You are not authorized to update user address"
-        );
+    const { addressId } = req.params;
+    const { 
+        fullName, 
+        line1, 
+        line2, 
+        city, 
+        state, 
+        postalCode, 
+        country, 
+        phoneNumber,
+        isDefault,
+        addressType,
+        isShipping,
+        isBilling
+    } = req.body;
+
+    if (!addressId) {
+        throw new ApiError(HTTP_BAD_REQUEST, "Address ID is required");
     }
 
-    const { street, city, state, postalCode, country } = req.body;
-
-    if (!street || !city || !state || !postalCode || !country) {
-        throw new ApiError(
-            HTTP_BAD_REQUEST,
-            "Please provide all required fields"
-        );
+    if (!fullName || !line1 || !city || !state || !postalCode || !country) {
+        throw new ApiError(HTTP_BAD_REQUEST, "Required address fields are missing");
     }
+
     try {
-        const session = await mongoose.startSession();
-        session.startTransaction();
-
-        const address = await Address.create(
-            [
-                {
-                    userId,
-                    street,
-                    city,
-                    state,
-                    postalCode,
-                    country,
-                },
-            ],
-            { session }
-        );
-
-        if (!address) {
-            throw new ApiError(
-                HTTP_INTERNAL_SERVER_ERROR,
-                "Error creating address"
-            );
-        }
-
-        const updatedUserDetails = await User.findByIdAndUpdate(
-            userId,
-            { addressId: address[0]?._id },
-            { new: true, runValidators: true }
-        );
-
-        if (!updatedUserDetails) {
-            throw new ApiError(
-                HTTP_INTERNAL_SERVER_ERROR,
-                "Error updating user address"
-            );
-        }
-
-        await session.commitTransaction();
-        session.endSession();
-
-        const updatedUser = await User.aggregate([
-            { $match: { _id: userId } },
-            {
-                $lookup: {
-                    from: "addresses",
-                    localField: "addressId",
-                    foreignField: "_id",
-                    as: "address",
-                },
-            },
-            { $unwind: "$address" },
-            {
-                $project: {
-                    _id: 1,
-                    username: 1,
-                    email: 1,
-                    address: {
-                        street: 1,
-                        city: 1,
-                        state: 1,
-                        postalCode: 1,
-                        country: 1,
-                    },
-                },
-            },
-        ]);
-
-        if (!(updatedUser.length > 0)) {
-            throw new ApiError(HTTP_NOT_FOUND, "User not found");
-        }
+        const address = await userService.updateUserAddress(userId, addressId, {
+            fullName, 
+            line1, 
+            line2, 
+            city, 
+            state, 
+            postalCode, 
+            country, 
+            phoneNumber,
+            isDefault,
+            addressType,
+            isShipping,
+            isBilling
+        });
 
         return res
             .status(HTTP_OK)
-            .json(
-                new ApiResponse(
-                    HTTP_OK,
-                    "User address updated successfully",
-                    updatedUser[0]
-                )
-            );
+            .json(new ApiResponse(HTTP_OK, "Address updated successfully", address));
     } catch (error) {
-        throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, error.message);
+        if (error.message.includes('Address not found or unauthorized')) {
+            throw new ApiError(HTTP_NOT_FOUND, error.message);
+        }
+        
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Error updating address"
+        );
     }
 });
 
 const getUserAddress = asyncHandler(async (req, res) => {
-    // Get the user from req.user
-    // Get the user id from req.user
-    // Query the address table with the user id
-    // Send the response with the user address
-    // Catch any error and pass it to the error handler
-
     const userId = req.user._id;
 
     if (!userId) {
@@ -806,15 +597,6 @@ const getUserAddress = asyncHandler(async (req, res) => {
 });
 
 const deleteUserAddress = asyncHandler(async (req, res) => {
-    // Get the user id from req.user
-    // Get the address id from req.params
-    // Query the address table with the address id
-    // If the address does not exist, throw an error "Address not found"
-    // if userId is not equal to the user id, throw an error "Not authorized to delete address"
-    // Delete the address
-    // Send the response with the message "Address deleted successfully"
-    // Catch any error and pass it to the error handler
-
     const userId = req.user._id;
 
     if (!userId) {
