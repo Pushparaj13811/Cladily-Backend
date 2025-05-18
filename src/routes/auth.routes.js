@@ -6,8 +6,10 @@ import {
   verifyOtp,
   logout,
   refreshAccessToken,
+  getUserDebugInfo,
+  testAdminAccess,
 } from '../controllers/auth.controller.js';
-import { authenticate } from '../middlewares/auth.middleware.js';
+import { authenticate, isAdmin } from '../middlewares/auth.middleware.js';
 import { rateLimiter } from '../middlewares/rateLimiter.middleware.js';
 import { AUTH_LIMITS } from '../utils/rateLimitWindows.js';
 
@@ -54,5 +56,19 @@ router.post('/logout', authenticate, logout);
  * @access Public
  */
 router.post('/refresh-token', rateLimiter(AUTH_LIMITS.STANDARD), refreshAccessToken);
+
+/**
+ * @route GET /api/auth/debug
+ * @desc Get detailed user info for debugging
+ * @access Private
+ */
+router.get('/debug', authenticate, getUserDebugInfo);
+
+/**
+ * @route GET /api/auth/admin-test
+ * @desc Test admin access (protected endpoint)
+ * @access Admin only
+ */
+router.get('/admin-test', authenticate, isAdmin, testAdminAccess);
 
 export default router; 

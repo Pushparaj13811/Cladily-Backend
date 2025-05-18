@@ -10,11 +10,14 @@ import {
   HTTP_BAD_REQUEST,
   HTTP_UNAUTHORIZED,
   HTTP_INTERNAL_SERVER_ERROR,
+  HTTP_NOT_FOUND,
 } from '../httpStatusCode.js';
+import { PrismaClient } from '@prisma/client';
 
 // Initialize services
 const authService = new AuthService();
 const otpService = new OtpService();
+const prisma = new PrismaClient();
 
 // Cookie options
 const accessTokenCookieOptions = {
@@ -228,4 +231,97 @@ export const refreshAccessToken = asyncHandler(async (req, res) => {
     res.clearCookie('refreshToken');
     throw new ApiError(HTTP_UNAUTHORIZED, 'Invalid refresh token');
   }
+});
+
+/**
+ * Get user debug info (for development/debugging purposes only)
+ */
+export const getUserDebugInfo = asyncHandler(async (req, res) => {
+  try {
+    // Get user from request (set by authentication middleware)
+    const userId = req.user?.id;
+    
+    if (!userId) {
+      throw new ApiError(HTTP_UNAUTHORIZED, 'User not authenticated');
+    }
+    
+    // Fetch user with full details from database
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        phoneNumber: true,
+        role: true,
+        status: true,
+        emailVerified: true,
+        phoneVerified: true,
+        createdAt: true,
+        updatedAt: true,
+      }
+    });
+    
+    if (!user) {
+      throw new ApiError(HTTP_NOT_FOUND, 'User not found');
+    }
+    
+    // Get active sessions
+    const sessions = await prisma.session.findMany({
+      where: {
+        userId,
+        expiresAt: { gt: new Date() }
+      },
+      select: {
+        id: true,
+        createdAt: true,
+        expiresAt: true,
+        deviceInfo: true,
+        ipAddress: true
+      }
+    });
+    
+    return res
+      .status(HTTP_OK)
+      .json(
+        new ApiResponse(HTTP_OK, 'User debug info', {
+          user,
+          sessions,
+          authInfo: {
+            authenticated: true,
+            tokenPayload: {
+              userId: req.user.id,
+              role: req.user.role,
+            }
+          }
+        })
+      );
+  } catch (error) {
+    throw new ApiError(
+      HTTP_INTERNAL_SERVER_ERROR,
+      error.message || 'Error fetching user debug info'
+    );
+  }
+});
+
+/**
+ * Test admin access (for debugging purposes only)
+ */
+export const testAdminAccess = asyncHandler(async (req, res) => {
+  // This endpoint can only be accessed if the user is authenticated and has admin role
+  // The middleware will handle the role check, so if we get here, the user is an admin
+  
+  return res
+    .status(HTTP_OK)
+    .json(
+      new ApiResponse(HTTP_OK, 'Admin access confirmed', {
+        user: {
+          id: req.user.id,
+          role: req.user.role,
+          name: `${req.user.firstName} ${req.user.lastName}`,
+        },
+        message: 'You have successfully accessed an admin-only endpoint'
+      })
+    );
 }); 

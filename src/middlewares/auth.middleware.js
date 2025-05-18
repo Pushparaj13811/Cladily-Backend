@@ -32,6 +32,7 @@ export const authenticate = asyncHandler(async (req, res, next) => {
 
     // Verify token using the token generator utility
     const decoded = verifyAccessToken(token);
+    console.log('Token decoded payload:', decoded);
 
     // Find user
     const user = await prisma.user.findUnique({
@@ -53,6 +54,12 @@ export const authenticate = asyncHandler(async (req, res, next) => {
     if (!user) {
       throw new ApiError(HTTP_UNAUTHORIZED, 'Invalid authentication token');
     }
+
+    console.log('User from database:', {
+      id: user.id,
+      role: user.role,
+      status: user.status
+    });
 
     // Check if user is active
     if (user.status !== 'ACTIVE') {
@@ -84,12 +91,25 @@ export const authenticate = asyncHandler(async (req, res, next) => {
  */
 export const authorize = (...roles) => {
   return (req, res, next) => {
+    console.log('Authorization check:', {
+      userRole: req.user?.role,
+      requiredRoles: roles,
+      hasAccess: req.user && roles.includes(req.user.role)
+    });
+
     if (!req.user) {
       throw new ApiError(HTTP_UNAUTHORIZED, 'Authentication required');
     }
 
-    if (!roles.includes(req.user.role)) {
-      throw new ApiError(HTTP_UNAUTHORIZED, 'You do not have permission to access this resource');
+    // Case-insensitive role check
+    const userRole = req.user.role.toUpperCase();
+    const normalizedRoles = roles.map(role => role.toUpperCase());
+    
+    if (!normalizedRoles.includes(userRole)) {
+      throw new ApiError(
+        HTTP_FORBIDDEN, 
+        `Access denied. Required role: ${roles.join(' or ')}, User role: ${req.user.role}`
+      );
     }
 
     next();
@@ -101,12 +121,20 @@ export const authorize = (...roles) => {
  * Checks if authenticated user has ADMIN role
  */
 export const isAdmin = asyncHandler(async (req, res, next) => {
+  console.log('Admin check:', {
+    userRole: req.user?.role,
+    hasAccess: req.user && req.user.role.toUpperCase() === 'ADMIN'
+  });
+
   if (!req.user) {
     throw new ApiError(HTTP_UNAUTHORIZED, 'Authentication required');
   }
 
-  if (req.user.role !== 'ADMIN') {
-    throw new ApiError(HTTP_FORBIDDEN, 'Admin access required');
+  if (req.user.role.toUpperCase() !== 'ADMIN') {
+    throw new ApiError(
+      HTTP_FORBIDDEN, 
+      `Admin access required. Current role: ${req.user.role}`
+    );
   }
 
   next();
