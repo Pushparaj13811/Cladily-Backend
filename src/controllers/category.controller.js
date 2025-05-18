@@ -8,7 +8,6 @@ import {
     HTTP_INTERNAL_SERVER_ERROR,
     HTTP_NOT_FOUND,
     HTTP_OK,
-    HTTP_UNAUTHORIZED,
 } from "../httpStatusCode.js";
 
 // Initialize service
@@ -24,6 +23,7 @@ const createCategory = asyncHandler(async (req, res) => {
         description, 
         parentId, 
         isActive, 
+        department,
         isVisible, 
         metaTitle, 
         metaDescription, 
@@ -45,6 +45,7 @@ const createCategory = asyncHandler(async (req, res) => {
             description,
             parentId,
             isActive,
+            department: capitalize(department),
             isVisible,
             metaTitle,
             metaDescription,
@@ -250,6 +251,7 @@ const updateCategory = asyncHandler(async (req, res) => {
         description, 
         parentId, 
         isActive, 
+        department,
         isVisible, 
         metaTitle, 
         metaDescription, 
@@ -274,7 +276,8 @@ const updateCategory = asyncHandler(async (req, res) => {
             slug,
             description,
             parentId,
-            isActive,
+            isActive,   
+            department,
             isVisible,
             metaTitle,
             metaDescription,

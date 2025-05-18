@@ -338,6 +338,7 @@ model Category {
   isVisible   Boolean    @default(true)
   level       Int        @default(0) // Hierarchy level (0 for root categories)
   path        String     @default("/") // Path in category tree (e.g., /1/5/12/)
+  department  Department @default(Menswear)
   metaTitle   String?
   metaDescription String?
   metaKeywords   String?
@@ -353,6 +354,12 @@ model Category {
   @@index([parentId])
   @@index([isActive])
   @@index([level])
+}
+
+enum Department {
+  Menswear
+  Womenswear
+  Kidswear
 }
 
 model ProductCategory {
