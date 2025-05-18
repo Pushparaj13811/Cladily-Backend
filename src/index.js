@@ -25,19 +25,40 @@ const displaySystemInfo = async () => {
         const dbVersion = await prisma.$queryRaw`SELECT VERSION() as version`;
         const dbName = await prisma.$queryRaw`SELECT DATABASE() as database_name`;
         
-        // Properly access Prisma metrics
-        const metrics = await prisma.$metrics.json();
-        const pool = metrics?.pools?.[0] || {};
+        // Get database stats manually for MySQL
+        const connectionStats = await prisma.$queryRaw`SHOW STATUS WHERE Variable_name IN 
+            ('Threads_connected', 'Connections', 'Max_used_connections', 'Threads_running', 'Max_connections')`;
+
+        // Convert array of rows to an object
+        const stats = {};
+        connectionStats.forEach(row => {
+            stats[row.Variable_name] = row.Value;
+        });
         
         console.log("\n📊 DATABASE CONNECTION");
         console.log(`📁 Database: ${dbName[0].database_name}`);
         console.log(`🔄 MySQL Version: ${dbVersion[0].version}`);
         console.log(`🔌 Connection Pool:`);
-        console.log(`   - Total Connections: ${pool?.counters?.totalConnectionRequests || 'N/A'}`);
-        console.log(`   - Active: ${pool?.gauges?.activeConnections || 0}`);
-        console.log(`   - Idle: ${pool?.gauges?.idleConnections || 0}`);
-        console.log(`   - Max: ${pool?.gauges?.maxConnections || 'N/A'}`);
-        console.log(`   - Wait Time: ${pool?.histograms?.waitTimeMicros?.p99 ? `${(pool.histograms.waitTimeMicros.p99/1000).toFixed(2)}ms (p99)` : 'N/A'}`);
+        console.log(`   - Total Connections: ${stats.Connections || 0}`);
+        console.log(`   - Active: ${stats.Threads_connected || 0}`);
+        console.log(`   - Running: ${stats.Threads_running || 0}`);
+        console.log(`   - Max Used: ${stats.Max_used_connections || 0}`);
+        console.log(`   - Max Allowed: ${stats.Max_connections || 0}`);
+        
+        // Also try to get Prisma metrics if available
+        try {
+            const metrics = await prisma.$metrics.json();
+            if (metrics && metrics.pools && metrics.pools.length > 0) {
+                const pool = metrics.pools[0];
+                console.log(`🔌 Prisma Connection Pool:`);
+                console.log(`   - Total Requests: ${pool.counters?.totalConnectionRequests || 0}`);
+                console.log(`   - Active: ${pool.gauges?.activeConnections || 0}`);
+                console.log(`   - Idle: ${pool.gauges?.idleConnections || 0}`);
+                console.log(`   - Max: ${pool.gauges?.maxConnections || 0}`);
+            }
+        } catch (metricsError) {
+            // Silent fail on metrics - we already have MySQL stats
+        }
     } catch (error) {
         console.log("\n📊 DATABASE CONNECTION");
         console.log(`❌ Unable to fetch detailed DB info: ${error.message}`);
@@ -89,8 +110,11 @@ const startServer = async () => {
             console.log(`✅ Server is running on port ${process.env.PORT || 8000}`);
             console.log(`⚡ Services initialized in ${connectionTime}ms`);
             
-            // Display system information
-            await displaySystemInfo();
+            // Wait a moment for metrics to fully initialize
+            setTimeout(async () => {
+                // Display system information
+                await displaySystemInfo();
+            }, 1000);
         });
 
         // Handle graceful shutdown
