@@ -16,9 +16,10 @@ const router = Router();
 
 // Public routes
 router.get("/", getAllProducts);
-router.get("/:productId", getProductById);
+// Specific route must come before generic pattern
 router.get("/slug/:slug", getProductBySlug);
 router.get("/:productId/related", getRelatedProducts);
+router.get("/:productId", getProductById);
 
 // Admin routes (require authentication)
 router.use(authenticate);

@@ -7,7 +7,7 @@
  * Where XXXXX is a random 5-digit number
  * @returns {String} - Unique order number
  */
-export const generateOrderNumber = () => {
+export const generateOrderNumber = (userId) => {
   const today = new Date();
   const year = today.getFullYear();
   const month = String(today.getMonth() + 1).padStart(2, '0');
@@ -16,7 +16,7 @@ export const generateOrderNumber = () => {
   // Generate random 5-digit number
   const randomDigits = Math.floor(10000 + Math.random() * 90000);
   
-  return `CL-${year}${month}${day}-${randomDigits}`;
+  return `CL-${userId}-${year}${month}${day}-${randomDigits}`;
 };
 
 /**
