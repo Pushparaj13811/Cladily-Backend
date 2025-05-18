@@ -501,4 +501,47 @@ export class UserService {
     
     return updatedUser;
   }
+
+  /**
+   * Update username
+   * @param {string} userId - User ID
+   * @param {string} username - New username
+   * @returns {Object} - Updated user object
+   */
+  async updateUsername(userId, username) {
+    // Check if username is already taken
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        username,
+        id: { not: userId }
+      }
+    });
+
+    if (existingUser) {
+      throw new Error('Username already exists');
+    }
+
+    // Update username
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: { username },
+      select: {
+        id: true,
+        email: true,
+        phoneNumber: true,
+        firstName: true,
+        lastName: true,
+        username: true,
+        role: true,
+        status: true,
+        profileImage: true,
+        phoneVerified: true,
+        emailVerified: true,
+        createdAt: true,
+        updatedAt: true,
+      }
+    });
+
+    return updatedUser;
+  }
 } 

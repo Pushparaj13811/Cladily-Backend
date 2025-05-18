@@ -11,12 +11,12 @@ import {
     HTTP_INTERNAL_SERVER_ERROR,
 } from "../httpStatusCode.js";
 import ApiResponse from "../utils/apiResponse.js";
-import sendVerificationCode from "../services/sendVerificationCode.service.js";
 import { UserService } from "../services/user.service.js";
 import { EmailService } from "../services/email.service.js";
 import { OtpService } from "../services/otp.service.js";
 import { AuthService } from "../services/auth.service.js";
 import { prisma } from "../database/connect.js";
+import { CartService } from "../services/cart.service.js";
 
 const options = {
     httpOnly: true,
@@ -41,10 +41,11 @@ const userService = new UserService();
 const emailService = new EmailService();
 const otpService = new OtpService();
 const authService = new AuthService();
+const cartService = new CartService();
 
 const registerUser = asyncHandler(async (req, res) => {
     const { email, phoneNumber, password, firstName, lastName } = req.body;
-    const { guestCartId } = req.cookies;
+    const sessionId = req.cookies?.guestId;
     
     if (!email || !password || !firstName || !lastName) {
         throw new ApiError(HTTP_BAD_REQUEST, "Please provide all required fields");
@@ -61,64 +62,11 @@ const registerUser = asyncHandler(async (req, res) => {
         });
 
         // Transfer guest cart if it exists
-        if (guestCartId) {
+        if (sessionId) {
             try {
-                // Find guest cart
-                const guestCart = await prisma.cart.findUnique({
-                    where: { id: guestCartId }
-                });
-                
-                if (guestCart) {
-                    // Get items from guest cart
-                    const cartItems = await prisma.cartItem.findMany({
-                        where: { cartId: guestCartId }
-                    });
-                    
-                    // Find user cart
-                    const userCart = await prisma.cart.findFirst({
-                        where: { userId: user.id }
-                    });
-                    
-                    // Transfer items to user cart
-                    if (userCart && cartItems.length > 0) {
-                        for (const item of cartItems) {
-                            await prisma.cartItem.create({
-                                data: {
-                                    cartId: userCart.id,
-                                    productId: item.productId,
-                                    variantId: item.variantId,
-                                    quantity: item.quantity,
-                                    price: item.price,
-                                    totalPrice: item.totalPrice
-                                }
-                            });
-                        }
-                        
-                        // Update cart totals
-                        await prisma.cart.update({
-                            where: { id: userCart.id },
-                            data: {
-                                subtotal: guestCart.subtotal,
-                                total: guestCart.total,
-                                itemCount: guestCart.itemCount,
-                                discountTotal: guestCart.discountTotal,
-                            }
-                        });
-                        
-                        // Delete guest cart items
-                        await prisma.cartItem.deleteMany({
-                            where: { cartId: guestCartId }
-                        });
-                        
-                        // Delete guest cart
-                        await prisma.cart.delete({
-                            where: { id: guestCartId }
-                        });
-                    }
-                }
-                
-                // Clear guest cart cookie
-                res.clearCookie("guestCartId", options);
+                await cartService.mergeGuestCart(user.id, sessionId);
+                // Clear the guest ID cookie
+                res.clearCookie("guestId", options);
             } catch (cartError) {
                 console.error("Error transferring guest cart:", cartError);
                 // Don't throw error here, just log it - user registration succeeded
@@ -271,62 +219,42 @@ const logoutUser = asyncHandler(async (req, res) => {
 });
 
 const resendVerificationCode = asyncHandler(async (req, res) => {
-    const userId = req.user._id;
-
-    if (!userId) {
-        throw new ApiError(
-            HTTP_INTERNAL_SERVER_ERROR,
-            "User not authenticated"
-        );
-    }
-
-    const user = await User.findById(userId);
-
-    if (!user) {
-        throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, "User not found");
-    }
-
-    const { phone } = user;
-
-    if (!phone) {
-        throw new ApiError(
-            HTTP_INTERNAL_SERVER_ERROR,
-            "Phone number not available"
-        );
-    }
+    const userId = req.user.id;
 
     try {
-        const response = await sendVerificationCode(phone);
+        const user = await prisma.user.findUnique({
+            where: { id: userId }
+        });
 
-        if (!response) {
-            throw new ApiError(
-                HTTP_INTERNAL_SERVER_ERROR,
-                "Error sending verification code"
-            );
+        if (!user) {
+            throw new ApiError(HTTP_NOT_FOUND, "User not found");
         }
+
+        if (!user.phoneNumber) {
+            throw new ApiError(HTTP_BAD_REQUEST, "User doesn't have a phone number");
+        }
+
+        // Generate and send OTP
+        const { otp } = await otpService.generateOTP(user.phoneNumber);
+        await otpService.sendOtpSms(user.phoneNumber, otp);
 
         return res
             .status(HTTP_OK)
-            .json(
-                new ApiResponse(
-                    HTTP_OK,
-                    "Verification code sent successfully",
-                    response
-                )
-            );
+            .json(new ApiResponse(HTTP_OK, "Verification code sent successfully", null));
     } catch (error) {
-        throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, error.message);
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Error sending verification code"
+        );
     }
 });
 
 const changeCurrentPassword = asyncHandler(async (req, res) => {
     const { currentPassword, newPassword, confirmNewPassword } = req.body;
+    const userId = req.user.id;
 
     if (!currentPassword || !newPassword || !confirmNewPassword) {
-        throw new ApiError(
-            HTTP_BAD_REQUEST,
-            "Please provide all required fields"
-        );
+        throw new ApiError(HTTP_BAD_REQUEST, "Please provide all required fields");
     }
 
     if (newPassword !== confirmNewPassword) {
@@ -334,23 +262,20 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
     }
 
     try {
-        const user = req.user;
-        const isPasswordCorrect = await user.isPasswordCorrect(currentPassword);
-
-        if (!isPasswordCorrect) {
-            throw new ApiError(HTTP_FORBIDDEN, "Incorrect Old password");
-        }
-
-        user.password = newPassword;
-        await user.save({ validateBeforeSave: false });
+        await userService.changePassword(userId, currentPassword, newPassword);
 
         return res
             .status(HTTP_OK)
-            .json(
-                new ApiResponse(HTTP_OK, "Password changed successfully", null)
-            );
+            .json(new ApiResponse(HTTP_OK, "Password changed successfully", null));
     } catch (error) {
-        throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, error.message);
+        if (error.message === 'Incorrect current password') {
+            throw new ApiError(HTTP_FORBIDDEN, error.message);
+        }
+        
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Error changing password"
+        );
     }
 });
 
@@ -463,53 +388,27 @@ const updateUserProfile = asyncHandler(async (req, res) => {
 
 const updateUsername = asyncHandler(async (req, res) => {
     const { username } = req.body;
+    const userId = req.user.id;
 
     if (!username) {
-        throw new ApiError(
-            HTTP_BAD_REQUEST,
-            "Please provide all required fields"
-        );
+        throw new ApiError(HTTP_BAD_REQUEST, "Username is required");
     }
 
-    const userId = req.user._id;
-
     try {
-        const existingUser = await User.findOne({
-            $or: [
-                { username }, // Check if the username exists
-                { _id: userId }, // Fetch the user by ID to update
-            ],
-        });
-
-        if (existingUser && existingUser._id.toString() !== userId.toString()) {
-            throw new ApiError(HTTP_BAD_REQUEST, "Username already exists");
-        }
-        const updatedUser = await User.findByIdAndUpdate(
-            userId,
-            { username },
-            { new: true, runValidators: true }
-        );
-
-        if (!updatedUser) {
-            throw new ApiError(
-                HTTP_UNAUTHORIZED,
-                "Not authorized to update user"
-            );
-        }
-
-        const resUser = cleanUserObject(updatedUser);
-
+        const updatedUser = await userService.updateUsername(userId, username);
+        
         return res
             .status(HTTP_OK)
-            .json(
-                new ApiResponse(
-                    HTTP_OK,
-                    "Username updated successfully",
-                    resUser
-                )
-            );
+            .json(new ApiResponse(HTTP_OK, "Username updated successfully", updatedUser));
     } catch (error) {
-        throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, error.message);
+        if (error.message === 'Username already exists') {
+            throw new ApiError(HTTP_BAD_REQUEST, error.message);
+        }
+        
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Error updating username"
+        );
     }
 });
 

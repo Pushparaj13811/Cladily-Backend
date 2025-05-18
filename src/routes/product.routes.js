@@ -14,11 +14,10 @@ import { handleDynamicFields, upload } from "../middlewares/multer.middleware.js
 
 const router = Router();
 
-// Public routes
-router.get("/", getAllProducts);
-// Specific route must come before generic pattern
+// Public routes - Specific routes must come before generic patterns
 router.get("/slug/:slug", getProductBySlug);
 router.get("/:productId/related", getRelatedProducts);
+router.get("/", getAllProducts);
 router.get("/:productId", getProductById);
 
 // Admin routes (require authentication)
