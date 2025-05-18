@@ -13,8 +13,8 @@ import categoryRouter from "./routes/category.routes.js";
 import reviewRouter from "./routes/review.routes.js";
 import couponRouter from "./routes/coupon.routes.js";
 import orderRouter from "./routes/order.routes.js";
-import wishlistRouter from './routes/wishlists.routes.js'
-// import cartRouter from "./routes/cart.routes.js";
+import wishlistRouter from './routes/wishlist.routes.js'
+import cartRouter from "./routes/cart.routes.js";
 // import guestRouter from "./routes/guest.routes.js";
 // import salesRouter from "./routes/sales.routes.js";
 import addressRouter from "./routes/address.routes.js";
@@ -54,7 +54,7 @@ app.use("/api/reviews", reviewRouter);
 app.use("/api/coupons", couponRouter);
 app.use("/api/orders", orderRouter);
 app.use("/api/wishlist", wishlistRouter);
-// app.use("/api/cart", cartRouter);
+app.use("/api/cart", cartRouter);
 // app.use("/api/guest", guestRouter);
 // app.use("/api/sales", salesRouter);
 app.use("/api/addresses", addressRouter);

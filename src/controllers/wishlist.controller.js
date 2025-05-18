@@ -1,8 +1,7 @@
 import ApiError from "../utils/apiError.js";
 import ApiResponse from "../utils/apiResponse.js";
-import redisClient from "../utils/redisClient.js";
-import { Wishlist } from "../models/wishlist.model.js";
-import { ProductVarient } from "../models/productVarient.model.js";
+import asyncHandler from "../utils/asyncHandler.js";
+import { WishlistService } from '../services/wishlist.service.js';
 import {
     HTTP_BAD_REQUEST,
     HTTP_INTERNAL_SERVER_ERROR,
@@ -10,196 +9,172 @@ import {
     HTTP_OK,
     HTTP_UNAUTHORIZED,
 } from "../httpStatusCode.js";
-import asyncHandler from "../utils/asyncHandler.js";
 
-const getItemsFromWishlist = asyncHandler(async (req, res) => {
-    // Get the user id from the request object
-    // Check if the user exists and throw an error if not
-    // Get the wishlist items for the user
-    // Return the wishlist items
-    // Handle any errors
+// Initialize service
+const wishlistService = new WishlistService();
 
-    const userId = req.user?._id;
+/**
+ * Get user's wishlist
+ */
+const getWishlist = asyncHandler(async (req, res) => {
+    const userId = req.user?.id;
+    
     if (!userId) {
-        throw new ApiError(
-            HTTP_UNAUTHORIZED,
-            "Unauthorized: You must be logged in to view wishlist"
-        );
+        throw new ApiError(HTTP_UNAUTHORIZED, "You must be logged in to view your wishlist");
     }
 
     try {
-        const wishlists = await redisClient.get(`wishlist:${userId}`);
-        let wishlistItems;
-        if (wishlists) {
-            wishlistItems = JSON.parse(wishlists);
-        } else {
-            wishlistItems = await Wishlist.find({ userId });
-            redisClient.set(
-                `wishlist:${userId}`,
-                JSON.stringify(wishlistItems)
-            );
-        }
-
+        const wishlist = await wishlistService.getWishlist(userId);
+        
         return res
             .status(HTTP_OK)
-            .json(
-                new ApiResponse(
-                    HTTP_OK,
-                    "Wishlist items retrieved",
-                    wishlistItems
-                )
-            );
+            .json(new ApiResponse(HTTP_OK, "Wishlist retrieved successfully", wishlist));
     } catch (error) {
         throw new ApiError(
-            error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
-            error.message || "Internal server error"
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Error retrieving wishlist"
         );
     }
 });
 
+/**
+ * Add product to wishlist
+ */
 const addToWishlist = asyncHandler(async (req, res) => {
-    // Get the user id from the request object
-    // Check if the user exists and throw an error if not
-    // Get the product varient id from the request body
-    // Check if the product varient exists
-    // Check if the product varient is already in the user's wishlist
-    // If it is, throw an error
-    // If it is not, add it to the wishlist
-    // Return the updated wishlist
-    // Handle any errors
-
-    const userId = req.user?._id;
+    const userId = req.user?.id;
+    
     if (!userId) {
-        throw new ApiError(
-            HTTP_UNAUTHORIZED,
-            "You must be logged in to add to wishlist"
-        );
+        throw new ApiError(HTTP_UNAUTHORIZED, "You must be logged in to add to wishlist");
     }
 
-    const productVarientId = req.body?.productVarientId;
-
-    if (!productVarientId) {
-        throw new ApiError(HTTP_BAD_REQUEST, "Product varient id is required");
+    const { productId } = req.body;
+    
+    if (!productId) {
+        throw new ApiError(HTTP_BAD_REQUEST, "Product ID is required");
     }
-
-    const session = await Wishlist.startSession();
-    session.startTransaction();
 
     try {
-        const product =
-            await ProductVarient.findById(productVarientId).session(session);
-
-        if (!product) {
-            throw new ApiError(HTTP_NOT_FOUND, "Product varient not found");
-        }
-
-        const wishlistItem = await Wishlist.findOne({
-            productVarientId,
-            userId,
-        }).session(session);
-
-        if (wishlistItem) {
-            throw new ApiError(
-                HTTP_BAD_REQUEST,
-                "Product varient already in wishlist"
-            );
-        }
-
-        const newWishlistItem = new Wishlist.create({
-            userId,
-            productVarientId,
-        });
-
-        await newWishlistItem.save({ session });
-
-        await session.commitTransaction();
-        session.endSession();
-
+        const wishlistItem = await wishlistService.addToWishlist(userId, productId);
+        
         return res
             .status(HTTP_OK)
-            .json(
-                new ApiResponse(
-                    HTTP_OK,
-                    "Product added to wishlist",
-                    newWishlistItem
-                )
-            );
+            .json(new ApiResponse(HTTP_OK, "Product added to wishlist", wishlistItem));
     } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
-
+        if (error.message === 'Product not found or inactive') {
+            throw new ApiError(HTTP_NOT_FOUND, error.message);
+        }
+        
+        if (error.message === 'Product already in wishlist') {
+            throw new ApiError(HTTP_BAD_REQUEST, error.message);
+        }
+        
         throw new ApiError(
-            error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
-            error.message || "Internal server error"
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Error adding product to wishlist"
         );
     }
 });
 
+/**
+ * Remove product from wishlist
+ */
 const removeFromWishlist = asyncHandler(async (req, res) => {
-    // Get the user id from the request object
-    // Check if the user exists and throw an error if not
-    // Get the product varient id from the request body
-    // Check if the product varient exists
-    // Check if the product varient is in the user's wishlist
-    // If it is not, throw an error
-    // If it is, remove it from the wishlist
-    // Return the updated wishlist
-    // Handle any errors
-
-    const userId = req.user?._id;
+    const userId = req.user?.id;
+    
     if (!userId) {
-        throw new ApiError(
-            HTTP_UNAUTHORIZED,
-            "You must be logged in to remove from wishlist"
-        );
+        throw new ApiError(HTTP_UNAUTHORIZED, "You must be logged in to remove from wishlist");
     }
 
-    const productVarientId = req.body?.productVarientId;
-
-    if (!productVarientId) {
-        throw new ApiError(HTTP_BAD_REQUEST, "Product varient id is required");
+    const { productId } = req.body;
+    
+    if (!productId) {
+        throw new ApiError(HTTP_BAD_REQUEST, "Product ID is required");
     }
-
-    const session = await Wishlist.startSession();
-    session.startTransaction();
 
     try {
-        const product =
-            await ProductVarient.findById(productVarientId).session(session);
-
-        if (!product) {
-            throw new ApiError(HTTP_NOT_FOUND, "Product varient not found");
-        }
-
-        const wishlistItem = await Wishlist.findOneAndDelete({
-            productVarientId,
-            userId,
-        }).session(session);
-
-        if (!wishlistItem) {
-            throw new ApiError(
-                HTTP_NOT_FOUND,
-                "Product varient not in wishlist"
-            );
-        }
-
-        await session.commitTransaction();
-        session.endSession();
-
+        await wishlistService.removeFromWishlist(userId, productId);
+        
         return res
             .status(HTTP_OK)
-            .json(
-                new ApiResponse(HTTP_OK, "Product removed from wishlist", null)
-            );
+            .json(new ApiResponse(HTTP_OK, "Product removed from wishlist"));
     } catch (error) {
-        await session.abortTransaction();
-        session.endSession();
-
+        if (error.message === 'Wishlist not found') {
+            throw new ApiError(HTTP_NOT_FOUND, error.message);
+        }
+        
+        if (error.message === 'Product not in wishlist') {
+            throw new ApiError(HTTP_NOT_FOUND, error.message);
+        }
+        
         throw new ApiError(
-            error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
-            error.message || "Internal server error"
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Error removing product from wishlist"
         );
     }
 });
 
-export { addToWishlist, removeFromWishlist, getItemsFromWishlist };
+/**
+ * Clear wishlist
+ */
+const clearWishlist = asyncHandler(async (req, res) => {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+        throw new ApiError(HTTP_UNAUTHORIZED, "You must be logged in to clear your wishlist");
+    }
+
+    try {
+        await wishlistService.clearWishlist(userId);
+        
+        return res
+            .status(HTTP_OK)
+            .json(new ApiResponse(HTTP_OK, "Wishlist cleared successfully"));
+    } catch (error) {
+        if (error.message === 'Wishlist not found') {
+            throw new ApiError(HTTP_NOT_FOUND, error.message);
+        }
+        
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Error clearing wishlist"
+        );
+    }
+});
+
+/**
+ * Check if product is in wishlist
+ */
+const isInWishlist = asyncHandler(async (req, res) => {
+    const userId = req.user?.id;
+    
+    if (!userId) {
+        throw new ApiError(HTTP_UNAUTHORIZED, "You must be logged in to check wishlist");
+    }
+
+    const { productId } = req.params;
+    
+    if (!productId) {
+        throw new ApiError(HTTP_BAD_REQUEST, "Product ID is required");
+    }
+
+    try {
+        const isInWishlist = await wishlistService.isInWishlist(userId, productId);
+        
+        return res
+            .status(HTTP_OK)
+            .json(new ApiResponse(HTTP_OK, "Wishlist status retrieved", { isInWishlist }));
+    } catch (error) {
+        throw new ApiError(
+            HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Error checking wishlist status"
+        );
+    }
+});
+
+export { 
+    getWishlist, 
+    addToWishlist, 
+    removeFromWishlist, 
+    clearWishlist, 
+    isInWishlist 
+};
