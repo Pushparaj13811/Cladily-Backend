@@ -24,16 +24,20 @@ const displaySystemInfo = async () => {
         // Use MySQL compatible queries instead of PostgreSQL
         const dbVersion = await prisma.$queryRaw`SELECT VERSION() as version`;
         const dbName = await prisma.$queryRaw`SELECT DATABASE() as database_name`;
-        const poolStats = await prisma.$metrics.json();
+        
+        // Properly access Prisma metrics
+        const metrics = await prisma.$metrics.json();
+        const pool = metrics?.pools?.[0] || {};
         
         console.log("\n📊 DATABASE CONNECTION");
         console.log(`📁 Database: ${dbName[0].database_name}`);
         console.log(`🔄 MySQL Version: ${dbVersion[0].version}`);
         console.log(`🔌 Connection Pool:`);
-        console.log(`   - Total: ${poolStats.counters.total_connection_requests}`);
-        console.log(`   - Active: ${poolStats.gauges.active_connections}`);
-        console.log(`   - Idle: ${poolStats.gauges.idle_connections}`);
-        console.log(`   - Max: ${poolStats.gauges.max_connections}`);
+        console.log(`   - Total Connections: ${pool?.counters?.totalConnectionRequests || 'N/A'}`);
+        console.log(`   - Active: ${pool?.gauges?.activeConnections || 0}`);
+        console.log(`   - Idle: ${pool?.gauges?.idleConnections || 0}`);
+        console.log(`   - Max: ${pool?.gauges?.maxConnections || 'N/A'}`);
+        console.log(`   - Wait Time: ${pool?.histograms?.waitTimeMicros?.p99 ? `${(pool.histograms.waitTimeMicros.p99/1000).toFixed(2)}ms (p99)` : 'N/A'}`);
     } catch (error) {
         console.log("\n📊 DATABASE CONNECTION");
         console.log(`❌ Unable to fetch detailed DB info: ${error.message}`);
