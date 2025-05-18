@@ -219,6 +219,24 @@ class RedisManager {
             return false;
         }
     }
+
+    /**
+     * Disconnect from Redis
+     * @returns {Promise<boolean>} - Success status
+     */
+    async disconnect() {
+        try {
+            if (this.client && this.isReady) {
+                await this.client.quit();
+                this.isReady = false;
+                return true;
+            }
+            return false;
+        } catch (error) {
+            console.error('Redis Disconnect Error:', error);
+            return false;
+        }
+    }
 }
 
 // Singleton instance

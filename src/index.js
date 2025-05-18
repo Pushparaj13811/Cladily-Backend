@@ -137,7 +137,7 @@ const gracefulShutdown = async (exitCode = 0) => {
 
         // Close Redis connection
         try {
-            await redisManager.getClient().quit();
+            await redisManager.disconnect();
             console.log('✅ Redis connection closed');
         } catch (error) {
             console.error(`❌ Error closing Redis connection: ${error.message}`);
