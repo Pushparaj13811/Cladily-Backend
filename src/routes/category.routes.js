@@ -2,6 +2,9 @@ import express from 'express';
 import {
     createCategory,
     getCategories,
+    getCategoryHierarchy,
+    getRootCategories,
+    getSubcategories,
     getCategoryById,
     getCategoryBySlug,
     updateCategory,
@@ -16,6 +19,9 @@ const router = express.Router();
 
 // Public routes
 router.get('/', rateLimiter(PUBLIC_API_LIMITS.HIGH_VOLUME), getCategories);
+router.get('/hierarchy', rateLimiter(PUBLIC_API_LIMITS.HIGH_VOLUME), getCategoryHierarchy);
+router.get('/roots', rateLimiter(PUBLIC_API_LIMITS.HIGH_VOLUME), getRootCategories);
+router.get('/parent/:parentId', rateLimiter(PUBLIC_API_LIMITS.HIGH_VOLUME), getSubcategories);
 router.get('/id/:id', rateLimiter(PUBLIC_API_LIMITS.HIGH_VOLUME), getCategoryById);
 router.get('/slug/:slug', rateLimiter(PUBLIC_API_LIMITS.HIGH_VOLUME), getCategoryBySlug);
 

@@ -12,21 +12,37 @@ export class CategoryService {
    * @returns {Object} - The created category
    */
   async createCategory(categoryData) {
-    const { name, description, imageUrl, parentId, position, isActive } = categoryData;
+    const { 
+      name, 
+      slug, 
+      description, 
+      parentId, 
+      isActive, 
+      isVisible, 
+      metaTitle, 
+      metaDescription, 
+      metaKeywords, 
+      imageUrl, 
+      iconUrl, 
+      sortOrder 
+    } = categoryData;
     
-    // Generate slug from name
-    const slug = slugify(name, { lower: true, strict: true });
+    // Generate slug from name if not provided
+    const categorySlug = slug || slugify(name, { lower: true, strict: true });
     
     // Check if slug already exists
-    const existingCategory = await prisma.category.findUnique({
-      where: { slug }
+    const existingSlug = await prisma.category.findUnique({
+      where: { slug: categorySlug }
     });
     
-    if (existingCategory) {
-      throw new Error('Category with this name already exists');
+    if (existingSlug) {
+      throw new Error(slug ? 'Category with this slug already exists' : 'Category with this name already exists');
     }
     
     // Check if parent category exists
+    let path = '/';
+    let level = 0;
+    
     if (parentId) {
       const parentCategory = await prisma.category.findUnique({
         where: { id: parentId }
@@ -35,18 +51,29 @@ export class CategoryService {
       if (!parentCategory) {
         throw new Error('Parent category not found');
       }
+      
+      // Set path and level based on parent
+      path = `${parentCategory.path}${parentId}/`;
+      level = parentCategory.level + 1;
     }
     
     // Create the category
     const category = await prisma.category.create({
       data: {
         name,
-        slug,
+        slug: categorySlug,
         description,
-        imageUrl,
         parentId,
-        position: position || 0,
-        isActive: isActive !== undefined ? isActive : true
+        path,
+        level,
+        isActive: isActive !== undefined ? isActive : true,
+        isVisible: isVisible !== undefined ? isVisible : true,
+        metaTitle,
+        metaDescription,
+        metaKeywords,
+        imageUrl,
+        iconUrl,
+        sortOrder: sortOrder || 0
       }
     });
     
@@ -86,24 +113,185 @@ export class CategoryService {
     const categories = await prisma.category.findMany({
       where,
       orderBy: [
-        { position: 'asc' },
+        { sortOrder: 'desc' },
         { name: 'asc' }
       ],
       include: {
-        children: {
-          where: {
-            isActive: !includeInactive ? true : undefined,
-            deletedAt: !includeDeleted ? null : undefined
-          },
-          orderBy: [
-            { position: 'asc' },
-            { name: 'asc' }
-          ]
+        _count: {
+          select: {
+            children: true,
+            products: true
+          }
         }
       }
     });
     
-    return categories;
+    // Add child and product counts
+    return categories.map(category => ({
+      ...category,
+      childrenCount: category._count.children,
+      productsCount: category._count.products,
+      _count: undefined
+    }));
+  }
+  
+  /**
+   * Get category hierarchy as a tree structure
+   * @param {Object} options - Query options
+   * @param {Boolean} options.includeInactive - Whether to include inactive categories
+   * @param {Boolean} options.includeDeleted - Whether to include soft deleted categories
+   * @returns {Array} - Hierarchical array of categories
+   */
+  async getCategoryHierarchy(options = {}) {
+    const { includeInactive = false, includeDeleted = false } = options;
+
+    // Get all categories first
+    const allCategories = await this.getCategories({
+      includeInactive,
+      includeDeleted
+    });
+    
+    // Create a map for quick lookups
+    const categoryMap = new Map();
+    allCategories.forEach(category => {
+      categoryMap.set(category.id, {
+        ...category,
+        children: []
+      });
+    });
+    
+    // Build the hierarchy
+    const rootCategories = [];
+    
+    for (const category of allCategories) {
+      const categoryWithChildren = categoryMap.get(category.id);
+      
+      if (!category.parentId) {
+        // This is a root category
+        rootCategories.push(categoryWithChildren);
+      } else if (categoryMap.has(category.parentId)) {
+        // Add as child to parent
+        const parent = categoryMap.get(category.parentId);
+        parent.children.push(categoryWithChildren);
+      } else {
+        // Parent doesn't exist or is filtered out, add as root
+        rootCategories.push(categoryWithChildren);
+      }
+    }
+    
+    return rootCategories;
+  }
+  
+  /**
+   * Get only root categories (categories without parents)
+   * @param {Object} options - Query options
+   * @param {Boolean} options.includeInactive - Whether to include inactive categories
+   * @param {Boolean} options.includeDeleted - Whether to include soft deleted categories
+   * @returns {Array} - Array of root categories
+   */
+  async getRootCategories(options = {}) {
+    const { includeInactive = false, includeDeleted = false } = options;
+    
+    // Filter conditions
+    const where = {
+      parentId: null
+    };
+    
+    // Filter by active status
+    if (!includeInactive) {
+      where.isActive = true;
+    }
+    
+    // Filter by deleted status
+    if (!includeDeleted) {
+      where.deletedAt = null;
+    }
+    
+    // Get categories
+    const rootCategories = await prisma.category.findMany({
+      where,
+      orderBy: [
+        { sortOrder: 'desc' },
+        { name: 'asc' }
+      ],
+      include: {
+        _count: {
+          select: {
+            children: true,
+            products: true
+          }
+        }
+      }
+    });
+    
+    // Add child and product counts
+    return rootCategories.map(category => ({
+      ...category,
+      childrenCount: category._count.children,
+      productsCount: category._count.products,
+      _count: undefined
+    }));
+  }
+  
+  /**
+   * Get subcategories for a specific parent category
+   * @param {String} parentId - Parent category ID
+   * @param {Object} options - Query options
+   * @param {Boolean} options.includeInactive - Whether to include inactive categories
+   * @param {Boolean} options.includeDeleted - Whether to include soft deleted categories
+   * @returns {Array} - Array of subcategories
+   */
+  async getSubcategories(parentId, options = {}) {
+    const { includeInactive = false, includeDeleted = false } = options;
+    
+    // Verify the parent exists
+    const parentExists = await prisma.category.findUnique({
+      where: { id: parentId }
+    });
+    
+    if (!parentExists) {
+      throw new Error('Parent category not found');
+    }
+    
+    // Filter conditions
+    const where = {
+      parentId
+    };
+    
+    // Filter by active status
+    if (!includeInactive) {
+      where.isActive = true;
+    }
+    
+    // Filter by deleted status
+    if (!includeDeleted) {
+      where.deletedAt = null;
+    }
+    
+    // Get subcategories
+    const subcategories = await prisma.category.findMany({
+      where,
+      orderBy: [
+        { sortOrder: 'desc' },
+        { name: 'asc' }
+      ],
+      include: {
+        _count: {
+          select: {
+            children: true,
+            products: true
+          }
+        }
+      }
+    });
+    
+    // Add child and product counts
+    return subcategories.map(category => ({
+      ...category,
+      childrenCount: category._count.children,
+      productsCount: category._count.products,
+      _count: undefined
+    }));
   }
   
   /**
@@ -123,9 +311,17 @@ export class CategoryService {
             deletedAt: null
           },
           orderBy: [
-            { position: 'asc' },
+            { sortOrder: 'desc' },
             { name: 'asc' }
-          ]
+          ],
+          include: {
+            _count: {
+              select: { 
+                children: true,
+                products: true
+              }
+            }
+          }
         },
         products: includeProducts ? {
           include: {
@@ -136,7 +332,13 @@ export class CategoryService {
               }
             }
           }
-        } : false
+        } : false,
+        _count: {
+          select: { 
+            children: true,
+            products: true
+          }
+        }
       }
     });
     
@@ -144,7 +346,21 @@ export class CategoryService {
       throw new Error('Category not found');
     }
     
-    return category;
+    // Add counts to the main category and child categories
+    const result = {
+      ...category,
+      childrenCount: category._count.children,
+      productsCount: category._count.products,
+      _count: undefined,
+      children: category.children.map(child => ({
+        ...child,
+        childrenCount: child._count.children,
+        productsCount: child._count.products,
+        _count: undefined
+      }))
+    };
+    
+    return result;
   }
   
   /**
@@ -164,9 +380,17 @@ export class CategoryService {
             deletedAt: null
           },
           orderBy: [
-            { position: 'asc' },
+            { sortOrder: 'desc' },
             { name: 'asc' }
-          ]
+          ],
+          include: {
+            _count: {
+              select: { 
+                children: true,
+                products: true
+              }
+            }
+          }
         },
         products: includeProducts ? {
           include: {
@@ -177,7 +401,13 @@ export class CategoryService {
               }
             }
           }
-        } : false
+        } : false,
+        _count: {
+          select: { 
+            children: true,
+            products: true
+          }
+        }
       }
     });
     
@@ -185,7 +415,21 @@ export class CategoryService {
       throw new Error('Category not found');
     }
     
-    return category;
+    // Add counts to the main category and child categories
+    const result = {
+      ...category,
+      childrenCount: category._count.children,
+      productsCount: category._count.products,
+      _count: undefined,
+      children: category.children.map(child => ({
+        ...child,
+        childrenCount: child._count.children,
+        productsCount: child._count.products,
+        _count: undefined
+      }))
+    };
+    
+    return result;
   }
   
   /**
@@ -195,7 +439,20 @@ export class CategoryService {
    * @returns {Object} - The updated category
    */
   async updateCategory(categoryId, categoryData) {
-    const { name, description, imageUrl, parentId, position, isActive } = categoryData;
+    const { 
+      name, 
+      slug, 
+      description, 
+      parentId, 
+      isActive, 
+      isVisible, 
+      metaTitle, 
+      metaDescription, 
+      metaKeywords, 
+      imageUrl, 
+      iconUrl, 
+      sortOrder 
+    } = categoryData;
     
     // Verify the category exists
     const existingCategory = await prisma.category.findUnique({
@@ -206,15 +463,31 @@ export class CategoryService {
       throw new Error('Category not found');
     }
     
-    // If name is changing, generate new slug and check for duplicates
-    let slug;
-    if (name && name !== existingCategory.name) {
-      slug = slugify(name, { lower: true, strict: true });
+    // If name or slug is changing, check for duplicates
+    let categorySlug = existingCategory.slug;
+    
+    if (slug && slug !== existingCategory.slug) {
+      categorySlug = slug;
       
       // Check if slug already exists (excluding this category)
       const duplicateSlug = await prisma.category.findFirst({
         where: { 
-          slug,
+          slug: categorySlug,
+          id: { not: categoryId }
+        }
+      });
+      
+      if (duplicateSlug) {
+        throw new Error('Category with this slug already exists');
+      }
+    } else if (name && name !== existingCategory.name && !slug) {
+      // Generate new slug from name
+      categorySlug = slugify(name, { lower: true, strict: true });
+      
+      // Check if slug already exists (excluding this category)
+      const duplicateSlug = await prisma.category.findFirst({
+        where: { 
+          slug: categorySlug,
           id: { not: categoryId }
         }
       });
@@ -224,26 +497,42 @@ export class CategoryService {
       }
     }
     
-    // Check for parent ID changes
-    if (parentId && parentId !== existingCategory.parentId) {
+    // Check for parent ID changes and path updates
+    let path = existingCategory.path;
+    let level = existingCategory.level;
+    
+    if (parentId !== undefined && parentId !== existingCategory.parentId) {
       // Prevent setting parent to itself
       if (parentId === categoryId) {
         throw new Error('Category cannot be its own parent');
       }
       
-      // Check if parent exists
-      const parentCategory = await prisma.category.findUnique({
-        where: { id: parentId }
-      });
-      
-      if (!parentCategory) {
-        throw new Error('Parent category not found');
+      if (parentId === null) {
+        // Moving to root level
+        path = '/';
+        level = 0;
+      } else {
+        // Check if parent exists
+        const parentCategory = await prisma.category.findUnique({
+          where: { id: parentId }
+        });
+        
+        if (!parentCategory) {
+          throw new Error('Parent category not found');
+        }
+        
+        // Check for circular references
+        if (await this.wouldCreateCycle(categoryId, parentId)) {
+          throw new Error('This would create a circular reference in the category hierarchy');
+        }
+        
+        // Set path and level based on parent
+        path = `${parentCategory.path}${parentId}/`;
+        level = parentCategory.level + 1;
       }
       
-      // Check for circular references
-      if (await this.wouldCreateCycle(categoryId, parentId)) {
-        throw new Error('This would create a circular reference in the category hierarchy');
-      }
+      // Update paths for all children recursively
+      await this.updateChildrenPaths(categoryId, path, level);
     }
     
     // Update the category
@@ -251,16 +540,70 @@ export class CategoryService {
       where: { id: categoryId },
       data: {
         ...(name && { name }),
-        ...(slug && { slug }),
+        ...(categorySlug !== existingCategory.slug && { slug: categorySlug }),
         ...(description !== undefined && { description }),
-        ...(imageUrl !== undefined && { imageUrl }),
         ...(parentId !== undefined && { parentId }),
-        ...(position !== undefined && { position }),
-        ...(isActive !== undefined && { isActive })
+        ...(path !== existingCategory.path && { path }),
+        ...(level !== existingCategory.level && { level }),
+        ...(isActive !== undefined && { isActive }),
+        ...(isVisible !== undefined && { isVisible }),
+        ...(metaTitle !== undefined && { metaTitle }),
+        ...(metaDescription !== undefined && { metaDescription }),
+        ...(metaKeywords !== undefined && { metaKeywords }),
+        ...(imageUrl !== undefined && { imageUrl }),
+        ...(iconUrl !== undefined && { iconUrl }),
+        ...(sortOrder !== undefined && { sortOrder })
+      },
+      include: {
+        _count: {
+          select: {
+            children: true,
+            products: true
+          }
+        }
       }
     });
     
-    return updatedCategory;
+    // Add counts to the result
+    const result = {
+      ...updatedCategory,
+      childrenCount: updatedCategory._count.children,
+      productsCount: updatedCategory._count.products,
+      _count: undefined
+    };
+    
+    return result;
+  }
+  
+  /**
+   * Update paths for all children of a category recursively
+   * @param {String} categoryId - Parent category ID
+   * @param {String} parentPath - New parent path
+   * @param {Number} parentLevel - New parent level
+   */
+  async updateChildrenPaths(categoryId, parentPath, parentLevel) {
+    // Get all immediate children
+    const children = await prisma.category.findMany({
+      where: { parentId: categoryId }
+    });
+    
+    for (const child of children) {
+      // Calculate new path and level
+      const childPath = `${parentPath}${categoryId}/`;
+      const childLevel = parentLevel + 1;
+      
+      // Update child
+      await prisma.category.update({
+        where: { id: child.id },
+        data: { 
+          path: childPath,
+          level: childLevel
+        }
+      });
+      
+      // Recursively update this child's children
+      await this.updateChildrenPaths(child.id, childPath, childLevel);
+    }
   }
   
   /**
@@ -303,7 +646,8 @@ export class CategoryService {
         where: { id: categoryId },
         data: { 
           deletedAt: new Date(),
-          isActive: false
+          isActive: false,
+          isVisible: false
         }
       });
     }
