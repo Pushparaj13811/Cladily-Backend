@@ -35,7 +35,7 @@ export const rateLimiter = (options) => {
     const {
         windowMs = 60 * 1000, // Default: 1 minute
         max = 60,             // Default: 60 requests per minute
-        algorithm = RATE_LIMIT_ALGORITHM.SLIDING_WINDOW,
+        algorithm = RATE_LIMIT_ALGORITHM.FIXED_WINDOW,  // Changed default to fixed window
         type = RATE_LIMIT_TYPE.IP,
         skip = () => false    // Default: don't skip
     } = options;
@@ -67,7 +67,7 @@ export const rateLimiter = (options) => {
         
         try {
             // Get the Redis client
-            const client = redisClient.getClient();
+            const client = await redisClient.getClient();
             
             let currentCount;
             const now = Date.now();
@@ -75,8 +75,10 @@ export const rateLimiter = (options) => {
             // Apply rate limiting based on algorithm
             switch (algorithm) {
                 case RATE_LIMIT_ALGORITHM.FIXED_WINDOW:
-                    // Simple key with expiration
-                    const count = await client.incr(key);
+                    // Simple key with expiration - using Redis client methods correctly
+                    const countStr = await client.get(key) || '0';
+                    const count = parseInt(countStr, 10) + 1;
+                    await client.set(key, count.toString());
                     if (count === 1) {
                         await client.expire(key, Math.ceil(windowMs / 1000));
                     }
@@ -84,21 +86,36 @@ export const rateLimiter = (options) => {
                     break;
                     
                 case RATE_LIMIT_ALGORITHM.SLIDING_WINDOW:
-                    // Store timestamps of each request within the window
-                    await client.zAdd(key, { score: now, value: now.toString() });
-                    await client.zRemRangeByScore(key, 0, now - windowMs);
-                    currentCount = await client.zCard(key);
-                    await client.expire(key, Math.ceil(windowMs / 1000));
+                    // Simplified sliding window using sorted sets
+                    // Add current timestamp to a list with the request time
+                    const nowStr = now.toString();
+                    await client.set(`${key}:${nowStr}`, '1');
+                    await client.expire(`${key}:${nowStr}`, Math.ceil(windowMs / 1000));
+                    
+                    // Get all keys in the window
+                    const keys = await client.keys(`${key}:*`);
+                    const validKeys = [];
+                    
+                    // Filter out expired timestamps
+                    for (const timeKey of keys) {
+                        const timestamp = parseInt(timeKey.split(':').pop(), 10);
+                        if (now - timestamp < windowMs) {
+                            validKeys.push(timeKey);
+                        } else {
+                            await client.del(timeKey);
+                        }
+                    }
+                    
+                    currentCount = validKeys.length;
                     break;
                     
                 case RATE_LIMIT_ALGORITHM.TOKEN_BUCKET:
-                    // Implementation of token bucket algorithm
-                    // This is a simplified version
-                    const lastRefill = await client.get(`${key}:lastRefill`);
-                    const tokens = await client.get(`${key}:tokens`);
+                    // Implementation of token bucket algorithm using standard Redis operations
+                    const lastRefillStr = await client.get(`${key}:lastRefill`) || now.toString();
+                    const tokensStr = await client.get(`${key}:tokens`) || max.toString();
                     
-                    let currentTokens = tokens ? parseInt(tokens, 10) : max;
-                    const lastRefillTime = lastRefill ? parseInt(lastRefill, 10) : now;
+                    let currentTokens = parseInt(tokensStr, 10);
+                    const lastRefillTime = parseInt(lastRefillStr, 10);
                     
                     // Calculate tokens to add based on time elapsed
                     const timePassed = now - lastRefillTime;
@@ -110,8 +127,8 @@ export const rateLimiter = (options) => {
                     if (currentTokens > 0) {
                         // Consume a token
                         currentTokens--;
-                        await client.set(`${key}:tokens`, currentTokens);
-                        await client.set(`${key}:lastRefill`, now);
+                        await client.set(`${key}:tokens`, currentTokens.toString());
+                        await client.set(`${key}:lastRefill`, now.toString());
                         await client.expire(`${key}:tokens`, Math.ceil(windowMs / 1000) * 2);
                         await client.expire(`${key}:lastRefill`, Math.ceil(windowMs / 1000) * 2);
                         currentCount = max - currentTokens;
@@ -122,8 +139,10 @@ export const rateLimiter = (options) => {
                     break;
                     
                 default:
-                    // Default to fixed window
-                    const defaultCount = await client.incr(key);
+                    // Default to fixed window with simple implementation
+                    const defaultCountStr = await client.get(key) || '0';
+                    const defaultCount = parseInt(defaultCountStr, 10) + 1;
+                    await client.set(key, defaultCount.toString());
                     if (defaultCount === 1) {
                         await client.expire(key, Math.ceil(windowMs / 1000));
                     }
