@@ -95,8 +95,8 @@ const getProductBySlug = asyncHandler(async (req, res) => {
             throw new ApiError(HTTP_NOT_FOUND, "Product not found");
         }
         
-        throw new ApiError(
-            error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
+                throw new ApiError(
+                    error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
             error.message || "Error retrieving product"
         );
     }
@@ -136,12 +136,12 @@ const getAllProducts = asyncHandler(async (req, res) => {
         });
 
         return res.status(HTTP_OK).json(
-            new ApiResponse(
+                new ApiResponse(
                 HTTP_OK, 
                 result, 
                 "Products fetched successfully"
-            )
-        );
+                )
+            );
     } catch (error) {
         throw new ApiError(
             error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
@@ -177,12 +177,12 @@ const updateProduct = asyncHandler(async (req, res) => {
         );
 
         return res.status(HTTP_OK).json(
-            new ApiResponse(
-                HTTP_OK, 
+                new ApiResponse(
+                    HTTP_OK,
                 product, 
                 "Product updated successfully"
-            )
-        );
+                )
+            );
     } catch (error) {
         if (error.message === "Product not found") {
             throw new ApiError(HTTP_NOT_FOUND, "Product not found");
@@ -295,12 +295,12 @@ const updateInventory = asyncHandler(async (req, res) => {
         const result = await productService.updateInventory(productId, variantId, parseInt(quantity));
 
         return res.status(HTTP_OK).json(
-            new ApiResponse(
-                HTTP_OK, 
+                new ApiResponse(
+                    HTTP_OK,
                 result, 
                 "Inventory updated successfully"
-            )
-        );
+                )
+            );
     } catch (error) {
         if (error.message.includes("not found")) {
             throw new ApiError(HTTP_NOT_FOUND, error.message);
