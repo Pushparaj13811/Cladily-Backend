@@ -45,7 +45,7 @@ const createCategory = asyncHandler(async (req, res) => {
             description,
             parentId,
             isActive,
-            department: capitalize(department),
+            department,
             isVisible,
             metaTitle,
             metaDescription,
