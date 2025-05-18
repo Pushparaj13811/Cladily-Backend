@@ -63,7 +63,7 @@ app.get("/api/health", (req, res) => {
 // Routes with specific rate limits
 app.use("/api/auth", rateLimiter(AUTH_LIMITS.STANDARD), authRouter);
 app.use("/api/products", rateLimiter(PUBLIC_API_LIMITS.HIGH_VOLUME), productRouter);
-app.use("/api/users", rateLimiter(PUBLIC_API_LIMITS.STANDARD), userRouter);
+app.use("/api/user", rateLimiter(PUBLIC_API_LIMITS.STANDARD), userRouter);
 app.use("/api/categories", rateLimiter(PUBLIC_API_LIMITS.HIGH_VOLUME), categoryRouter);
 app.use("/api/reviews", rateLimiter(PUBLIC_API_LIMITS.STANDARD), reviewRouter);
 app.use("/api/coupons", rateLimiter(PUBLIC_API_LIMITS.STANDARD), couponRouter);

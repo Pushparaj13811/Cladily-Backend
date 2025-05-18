@@ -8,7 +8,8 @@ import {
     resendVerificationEmail,
     verifyEmail,
     resendVerificationCode,
-    verifyPhone
+    verifyPhone,
+    activateUserAccount
 } from '../controllers/user.controller.js';
 import { authenticate, isAdmin } from '../middlewares/auth.middleware.js';
 import { rateLimiter } from '../middlewares/rateLimiter.middleware.js';
@@ -29,6 +30,9 @@ router.get('/profile', rateLimiter(AUTHENTICATED_API_LIMITS.STANDARD), getUserPr
 router.put('/profile', rateLimiter(AUTHENTICATED_API_LIMITS.WRITE), updateUserProfile);
 router.post('/change-password', rateLimiter(AUTHENTICATED_API_LIMITS.SENSITIVE), changeCurrentPassword);
 router.post('/resend-verification', rateLimiter(AUTH_LIMITS.STANDARD), resendVerificationEmail);
+
+// Account activation route
+router.post('/activate', rateLimiter(AUTHENTICATED_API_LIMITS.STANDARD), activateUserAccount);
 
 // Phone verification
 router.post('/request-phone-verification', rateLimiter(AUTH_LIMITS.OTP), resendVerificationCode);

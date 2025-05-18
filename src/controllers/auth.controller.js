@@ -3,7 +3,7 @@ import { OtpService } from '../services/otp.service.js';
 import ApiError from '../utils/apiError.js';
 import ApiResponse from '../utils/apiResponse.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import { signCookieValue } from '../utils/tokenGenerator.js';
+import { signCookieValue, verifyCookieValue } from '../utils/tokenGenerator.js';
 import {
   HTTP_OK,
   HTTP_CREATED,
@@ -32,7 +32,6 @@ const refreshTokenCookieOptions = {
   secure: process.env.NODE_ENV === 'production',
   sameSite: 'Strict',
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days (matches REFRESH_TOKEN_EXPIRES_IN)
-  path: '/api/auth/refresh', // Restrict refresh token cookie to refresh endpoint
 };
 
 /**
@@ -97,7 +96,8 @@ export const loginWithPassword = asyncHandler(async (req, res) => {
       .json(
         new ApiResponse(HTTP_OK, 'Login successful', {
           user,
-          accessToken, // Still send token in response for API clients
+          accessToken,
+          refreshToken
         })
       );
   } catch (error) {
@@ -199,15 +199,39 @@ export const logout = asyncHandler(async (req, res) => {
  * Refresh token
  */
 export const refreshAccessToken = asyncHandler(async (req, res) => {
-  const { refreshToken } = req.cookies;
+  // Get refresh token from cookies or request body or headers
+  const cookieRefreshToken = req.cookies?.refreshToken;
+  const bodyRefreshToken = req.body?.refreshToken;
+  const headerRefreshToken = req.header('X-Refresh-Token');
+
+  const refreshToken = cookieRefreshToken || bodyRefreshToken || headerRefreshToken;
+
+  console.log('Refresh token request received:', {
+    fromCookie: !!cookieRefreshToken,
+    fromBody: !!bodyRefreshToken,
+    fromHeader: !!headerRefreshToken,
+    hasToken: !!refreshToken
+  });
 
   if (!refreshToken) {
     throw new ApiError(HTTP_UNAUTHORIZED, 'Refresh token is required');
   }
 
   try {
+    // Verify cookie signature if token from cookie
+    let verifiedToken = refreshToken;
+    if (cookieRefreshToken) {
+      verifiedToken = verifyCookieValue(cookieRefreshToken);
+      if (!verifiedToken) {
+        throw new ApiError(HTTP_UNAUTHORIZED, 'Invalid refresh token signature');
+      }
+    }
+
+    console.log('Processing refresh token request');
+
+    // Get new tokens
     const { accessToken, refreshToken: newRefreshToken } = await authService.refreshToken(
-      refreshToken
+      verifiedToken
     );
 
     // Sign cookies with COOKIE_SECRET for added security
@@ -218,14 +242,18 @@ export const refreshAccessToken = asyncHandler(async (req, res) => {
     res.cookie('accessToken', signedAccessToken, accessTokenCookieOptions);
     res.cookie('refreshToken', signedRefreshToken, refreshTokenCookieOptions);
 
+    console.log('Successfully refreshed tokens');
+
     return res
       .status(HTTP_OK)
       .json(
         new ApiResponse(HTTP_OK, 'Access token refreshed', {
           accessToken,
+          refreshToken: newRefreshToken
         })
       );
   } catch (error) {
+    console.error('Refresh token error:', error.message);
     // Clear cookies on error
     res.clearCookie('accessToken');
     res.clearCookie('refreshToken');
@@ -240,11 +268,11 @@ export const getUserDebugInfo = asyncHandler(async (req, res) => {
   try {
     // Get user from request (set by authentication middleware)
     const userId = req.user?.id;
-    
+
     if (!userId) {
       throw new ApiError(HTTP_UNAUTHORIZED, 'User not authenticated');
     }
-    
+
     // Fetch user with full details from database
     const user = await prisma.user.findUnique({
       where: { id: userId },
@@ -262,11 +290,11 @@ export const getUserDebugInfo = asyncHandler(async (req, res) => {
         updatedAt: true,
       }
     });
-    
+
     if (!user) {
       throw new ApiError(HTTP_NOT_FOUND, 'User not found');
     }
-    
+
     // Get active sessions
     const sessions = await prisma.session.findMany({
       where: {
@@ -281,7 +309,7 @@ export const getUserDebugInfo = asyncHandler(async (req, res) => {
         ipAddress: true
       }
     });
-    
+
     return res
       .status(HTTP_OK)
       .json(
@@ -311,7 +339,7 @@ export const getUserDebugInfo = asyncHandler(async (req, res) => {
 export const testAdminAccess = asyncHandler(async (req, res) => {
   // This endpoint can only be accessed if the user is authenticated and has admin role
   // The middleware will handle the role check, so if we get here, the user is an admin
-  
+
   return res
     .status(HTTP_OK)
     .json(

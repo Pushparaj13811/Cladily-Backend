@@ -57,6 +57,9 @@ router.post('/logout', authenticate, logout);
  */
 router.post('/refresh-token', rateLimiter(AUTH_LIMITS.STANDARD), refreshAccessToken);
 
+// Also add a GET route for refresh token for more compatibility
+router.get('/refresh-token', rateLimiter(AUTH_LIMITS.STANDARD), refreshAccessToken);
+
 /**
  * @route GET /api/auth/debug
  * @desc Get detailed user info for debugging

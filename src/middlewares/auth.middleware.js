@@ -16,6 +16,12 @@ export const authenticate = asyncHandler(async (req, res, next) => {
   try {
     // Get token from Authorization header or cookies
     let token = req.cookies?.accessToken || req.header('Authorization')?.replace('Bearer ', '');
+    
+    console.log('Auth middleware - Token source:', {
+      fromCookie: !!req.cookies?.accessToken,
+      fromHeader: !!req.header('Authorization'),
+      hasToken: !!token
+    });
 
     if (!token) {
       throw new ApiError(HTTP_UNAUTHORIZED, 'Authentication required');
@@ -23,11 +29,36 @@ export const authenticate = asyncHandler(async (req, res, next) => {
 
     // If token comes from a cookie, verify the cookie signature
     if (req.cookies?.accessToken) {
+      console.log('Cookie value length:', req.cookies.accessToken.length);
+      console.log('Cookie format check:', req.cookies.accessToken.includes('.'));
+      
       const verifiedValue = verifyCookieValue(req.cookies.accessToken);
+      console.log('Verified value:', verifiedValue);
       if (!verifiedValue) {
-        throw new ApiError(HTTP_UNAUTHORIZED, 'Invalid cookie signature');
+        console.log('Invalid cookie signature for token');
+        
+        // Check if the cookie value already looks like a JWT (not signed)
+        // This could happen if client directly sets the cookie instead of server
+        const jwtParts = req.cookies.accessToken.split('.');
+        if (jwtParts.length === 3) {
+          console.log('Cookie appears to be a raw JWT token, attempting direct verification');
+          try {
+            // Try to verify it directly as a JWT
+            const decoded = verifyAccessToken(req.cookies.accessToken);
+            if (decoded) {
+              console.log('Token verified directly as JWT');
+              token = req.cookies.accessToken;
+            }
+          } catch (jwtError) {
+            console.log('Direct JWT verification also failed:', jwtError.message);
+            throw new ApiError(HTTP_UNAUTHORIZED, 'Invalid token');
+          }
+        } else {
+          throw new ApiError(HTTP_UNAUTHORIZED, 'Invalid cookie signature');
+        }
+      } else {
+        token = verifiedValue;
       }
-      token = verifiedValue;
     }
 
     // Verify token using the token generator utility
@@ -52,17 +83,20 @@ export const authenticate = asyncHandler(async (req, res, next) => {
     });
 
     if (!user) {
+      console.log(`User not found for userId: ${decoded.userId}`);
       throw new ApiError(HTTP_UNAUTHORIZED, 'Invalid authentication token');
     }
 
     console.log('User from database:', {
       id: user.id,
       role: user.role,
-      status: user.status
+      status: user.status,
+      name: `${user.firstName} ${user.lastName}`
     });
 
     // Check if user is active
-    if (user.status !== 'ACTIVE') {
+    if (user.status !== 'ACTIVE' && user.status !== 'PENDING_VERIFICATION') {
+      console.log(`User status is ${user.status}, not ACTIVE or PENDING_VERIFICATION`);
       throw new ApiError(HTTP_UNAUTHORIZED, 'User account is not active');
     }
 
@@ -73,13 +107,16 @@ export const authenticate = asyncHandler(async (req, res, next) => {
   } catch (error) {
     // Handle JWT errors
     if (error.name === 'JsonWebTokenError') {
+      console.log('JWT Error:', error.message);
       throw new ApiError(HTTP_UNAUTHORIZED, 'Invalid token');
     }
     if (error.name === 'TokenExpiredError') {
+      console.log('Token expired at:', error.expiredAt);
       throw new ApiError(HTTP_UNAUTHORIZED, 'Token expired');
     }
 
     // Pass other errors
+    console.log('Auth middleware error:', error.message || 'Unknown error');
     throw error;
   }
 });

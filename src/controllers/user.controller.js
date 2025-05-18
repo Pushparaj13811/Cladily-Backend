@@ -446,6 +446,62 @@ const verifyPhone = async (req, res) => {
   }
 };
 
+/**
+ * Activate a user account (for users stuck in PENDING_VERIFICATION)
+ */
+const activateUserAccount = asyncHandler(async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    // Get current user status
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        status: true,
+      },
+    });
+    
+    if (!user) {
+      throw new ApiError(HTTP_NOT_FOUND, "User not found");
+    }
+    
+    // Only activate if in PENDING_VERIFICATION status
+    if (user.status !== 'PENDING_VERIFICATION') {
+      return res
+        .status(HTTP_OK)
+        .json(new ApiResponse(HTTP_OK, "User account is already active", { status: user.status }));
+    }
+    
+    // Update user status to ACTIVE
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        status: 'ACTIVE',
+      },
+      select: {
+        id: true,
+        email: true,
+        phoneNumber: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        status: true,
+        phoneVerified: true,
+        emailVerified: true,
+      },
+    });
+    
+    return res
+      .status(HTTP_OK)
+      .json(new ApiResponse(HTTP_OK, "User account activated successfully", updatedUser));
+  } catch (error) {
+    throw new ApiError(
+      HTTP_INTERNAL_SERVER_ERROR,
+      error.message || "Error activating user account"
+    );
+  }
+});
+
 export {
     registerUser,
     loginUser,
@@ -459,5 +515,6 @@ export {
     updateUsername,
     verifyEmail,
     resendVerificationEmail,
-    verifyPhone
+    verifyPhone,
+    activateUserAccount
 };
