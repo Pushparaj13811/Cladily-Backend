@@ -17,6 +17,7 @@ import wishlistRouter from './routes/wishlist.routes.js'
 import cartRouter from "./routes/cart.routes.js";
 import salesRouter from "./routes/sales.routes.js";
 import addressRouter from "./routes/address.routes.js";
+import departmentRouter from "./routes/department.routes.js";
 
 // Import rate limiting middleware and configurations
 import { rateLimiter } from "./middlewares/rateLimiter.middleware.js";
@@ -72,6 +73,7 @@ app.use("/api/wishlist", rateLimiter(PUBLIC_API_LIMITS.STANDARD), wishlistRouter
 app.use("/api/cart", rateLimiter(PUBLIC_API_LIMITS.STANDARD), cartRouter);
 app.use("/api/sales", rateLimiter(PUBLIC_API_LIMITS.STANDARD), salesRouter);
 app.use("/api/addresses", rateLimiter(PUBLIC_API_LIMITS.STANDARD), addressRouter);
+app.use("/api/departments", rateLimiter(PUBLIC_API_LIMITS.HIGH_VOLUME), departmentRouter);
 
 // Root endpoint
 app.get("/", rateLimiter(PUBLIC_API_LIMITS.RELAXED), (req, res) => {

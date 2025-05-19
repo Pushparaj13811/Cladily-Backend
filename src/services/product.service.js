@@ -369,7 +369,8 @@ export class ProductService {
       minPrice,
       maxPrice,
       sortBy = 'createdAt',
-      sortOrder = 'desc'
+      sortOrder = 'desc',
+      department
     } = options;
     
     console.log("Query options received:", options);
@@ -386,6 +387,11 @@ export class ProductService {
     // Only filter by status if provided and not empty
     if (status && status.trim() !== '') {
       whereClause.status = status;
+    }
+    
+    // Filter by department if provided
+    if (department && department.trim() !== '') {
+      whereClause.departmentId = department;
     }
     
     if (minPrice !== undefined && minPrice !== '') {

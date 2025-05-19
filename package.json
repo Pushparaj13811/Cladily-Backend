@@ -9,7 +9,8 @@
     "dev": "nodemon -r dotenv/config --experimental-json-modules src/index.js",
     "format": "prettier --write .",
     "lint": "eslint .",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "seed": "node -r dotenv/config src/scripts/seed.js"
   },
   "keywords": [
     "Cladily",
