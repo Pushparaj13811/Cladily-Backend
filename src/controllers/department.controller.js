@@ -239,11 +239,45 @@ const deleteDepartment = asyncHandler(async (req, res) => {
     }
 });
 
+/**
+ * Get categories by department
+ */
+const getCategoriesByDepartment = asyncHandler(async (req, res) => {
+    const { departmentId } = req.params;
+
+    if (!departmentId) {
+        throw new ApiError(HTTP_BAD_REQUEST, "Department ID is required");
+    }
+
+    try {
+        const department = await departmentService.getDepartmentById(departmentId);
+        
+        return res.status(HTTP_OK).json(
+            new ApiResponse(
+                HTTP_OK, 
+                department.categories, 
+                "Department categories fetched successfully"
+            )
+        );
+    } catch (error) {
+        if (error.message === "Department not found") {
+            throw new ApiError(HTTP_NOT_FOUND, "Department not found");
+        }
+        
+        console.error("Error in getCategoriesByDepartment:", error);
+        throw new ApiError(
+            error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
+            error.message || "Error fetching department categories"
+        );
+    }
+});
+
 export {
     createDepartment,
     getAllDepartments,
     getDepartmentById,
     getProductsByDepartment,
     updateDepartment,
-    deleteDepartment
+    deleteDepartment,
+    getCategoriesByDepartment
 }; 
