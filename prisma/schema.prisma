@@ -307,8 +307,8 @@ model Category {
   isVisible       Boolean    @default(true)
   level           Int        @default(0) // Hierarchy level (0 for root categories)
   path            String     @default("/") // Path in category tree (e.g., /1/5/12/)
-  departmentId    String
-  department      Department @relation(fields: [departmentId], references: [id])
+  departmentId    String?
+  department      Department? @relation(fields: [departmentId], references: [id])
   metaTitle       String?
   metaDescription String?
   metaKeywords    String?

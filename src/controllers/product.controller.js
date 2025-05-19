@@ -51,7 +51,8 @@ const createProduct = asyncHandler(async (req, res) => {
     // This helps with implementations that append individual fields rather than using productData
     const directFields = [
         'name', 'description', 'shortDescription', 'price', 'compareAtPrice', 
-        'cost', 'sku', 'barcode', 'weight', 'weightUnit', 'status', 'taxable'
+        'cost', 'sku', 'barcode', 'weight', 'weightUnit', 'status', 'taxable',
+        'departmentId'
     ];
     
     directFields.forEach(field => {
@@ -113,6 +114,11 @@ const createProduct = asyncHandler(async (req, res) => {
         }
     } else if (!productData.categoryIds) {
         productData.categoryIds = [];
+    }
+    
+    // Handle departmentId
+    if (productData.departmentId && typeof productData.departmentId === 'string') {
+        console.log("Using department ID:", productData.departmentId);
     }
     
     // Ensure the minimum required fields are present (name, description, price)
@@ -234,13 +240,13 @@ const getAllProducts = asyncHandler(async (req, res) => {
             limit,
             status,
             category,
-            brand,
             tag,
             search,
             minPrice,
             maxPrice,
             sortBy,
-            sortOrder
+            sortOrder,
+            departmentId
         } = req.query;
 
         const result = await productService.getProducts({
@@ -248,13 +254,13 @@ const getAllProducts = asyncHandler(async (req, res) => {
             limit,
             status,
             category,
-            brand,
             tag,
             search,
             minPrice,
             maxPrice,
             sortBy,
-            sortOrder
+            sortOrder,
+            department: departmentId
         });
 
         console.log(`API response prepared: ${result.products.length} products found`);

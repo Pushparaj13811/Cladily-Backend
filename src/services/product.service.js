@@ -31,7 +31,6 @@ export class ProductService {
       dimensions = null,
       taxable = true,
       taxCode = null,
-      brandId = null,
       categories = [],
       tags = [],
       variants = [],
@@ -43,6 +42,7 @@ export class ProductService {
       colors = null,
       deliveryInfo = null,
       department = null,
+      departmentId = null,
       subcategory = null
     } = productData;
 
@@ -107,9 +107,9 @@ export class ProductService {
             : null,
           taxable: taxable !== undefined ? taxable : true,
           taxCode,
-          brandId,
           status,
           material,
+          departmentId,
           care: care ? (typeof care === 'string' ? JSON.parse(care) : care) : null,
           features: features ? (typeof features === 'string' ? JSON.parse(features) : features) : null,
           sizes: sizes ? (typeof sizes === 'string' ? JSON.parse(sizes) : sizes) : null,
@@ -248,7 +248,7 @@ export class ProductService {
               }
             },
             tags: true,
-            brand: true
+            department: true
           }
         });
       });
@@ -275,7 +275,7 @@ export class ProductService {
           }
         },
         tags: true,
-        brand: true,
+        department: true,
         reviews: {
           where: {
             status: 'APPROVED',
@@ -322,7 +322,7 @@ export class ProductService {
           }
         },
         tags: true,
-        brand: true,
+        department: true,
         reviews: {
           where: {
             status: 'APPROVED',
@@ -363,7 +363,6 @@ export class ProductService {
       limit = 20,
       status,
       category,
-      brand,
       tag,
       search,
       minPrice,
@@ -416,10 +415,6 @@ export class ProductService {
       };
     }
     
-    if (brand && brand !== '') {
-      whereClause.brandId = brand;
-    }
-    
     if (tag && tag !== '') {
       whereClause.tags = {
         some: {
@@ -468,13 +463,6 @@ export class ProductService {
           include: {
             images: true,
             variants: true,
-            brand: {
-              select: {
-                id: true,
-                name: true,
-                slug: true
-              }
-            },
             categories: {
               include: {
                 category: {
@@ -485,7 +473,8 @@ export class ProductService {
                   }
                 }
               }
-            }
+            },
+            department: true
           }
         }),
         prisma.product.count({
@@ -592,7 +581,6 @@ export class ProductService {
       dimensions,
       taxable,
       taxCode,
-      brandId,
       categories = [],
       tags = [],
       variants = [],
@@ -640,7 +628,6 @@ export class ProductService {
           ...(dimensions && { dimensions: typeof dimensions === 'string' ? JSON.parse(dimensions) : dimensions }),
           ...(taxable !== undefined && { taxable }),
           ...(taxCode !== undefined && { taxCode }),
-          ...(brandId !== undefined && { brandId }),
           ...(status && { status })
         }
       });
@@ -815,7 +802,7 @@ export class ProductService {
             }
           },
           tags: true,
-          brand: true
+          department: true
         }
       });
     });

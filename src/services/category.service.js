@@ -1,6 +1,5 @@
 import { prisma } from '../database/connect.js';
 import slugify from 'slugify';
-import { Department } from '@prisma/client';
 
 /**
  * Category Service

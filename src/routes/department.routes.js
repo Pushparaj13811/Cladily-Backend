@@ -7,7 +7,7 @@ import {
     updateDepartment,
     deleteDepartment
 } from '../controllers/department.controller.js';
-import { verifyJWT } from '../middlewares/auth.middleware.js';
+import { authenticate } from '../middlewares/auth.middleware.js';
 
 const router = Router();
 
@@ -17,8 +17,10 @@ router.get('/:departmentId', getDepartmentById);
 router.get('/:departmentId/products', getProductsByDepartment);
 
 // Protected routes - require authentication
-router.post('/', verifyJWT, createDepartment);
-router.put('/:departmentId', verifyJWT, updateDepartment);
-router.delete('/:departmentId', verifyJWT, deleteDepartment);
+router.use(authenticate);
+ 
+router.post('/', createDepartment);
+router.put('/:departmentId', updateDepartment);
+router.delete('/:departmentId', deleteDepartment);
 
 export default router; 
