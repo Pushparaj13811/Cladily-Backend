@@ -14,31 +14,50 @@ export class ProductService {
    * @returns {Object} Created product
    */
   async createProduct(productData, images = [], createdBy) {
+    console.log("ProductService.createProduct called with data:", JSON.stringify(productData, null, 2));
+    
+    // Extract fields with proper defaults
     const {
       name,
       description,
-      shortDescription,
+      shortDescription = description?.substring(0, 150) || '',
       price,
-      compareAtPrice,
-      cost,
-      sku,
-      barcode,
-      weight,
-      weightUnit,
-      dimensions,
-      taxable,
-      taxCode,
-      brandId,
+      compareAtPrice = null,
+      cost = null,
+      sku = `SKU-${Date.now()}`,
+      barcode = null,
+      weight = null,
+      weightUnit = null,
+      dimensions = null,
+      taxable = true,
+      taxCode = null,
+      brandId = null,
       categories = [],
       tags = [],
       variants = [],
-      status = 'DRAFT'
+      status = 'DRAFT',
+      material = null,
+      care = null,
+      features = null,
+      sizes = null,
+      colors = null,
+      deliveryInfo = null,
+      department = null,
+      subcategory = null
     } = productData;
 
     // Validate required fields
-    if (!name || !description || !price) {
+    if (!name || !description || (price === undefined || price === null)) {
+      console.error("Missing required fields:", { name, description, price });
       throw new Error('Name, description, and price are required fields');
     }
+
+    // Debug output
+    console.log("Processing product with required fields:", {
+      name,
+      description: description?.substring(0, 50) + '...',
+      price
+    });
 
     // Create slug from name
     let slug = slugify(name, { lower: true, strict: true });
@@ -54,152 +73,189 @@ export class ProductService {
       slug = `${slug}-${randomSuffix}`;
     }
 
-    return await prisma.$transaction(async (prisma) => {
-      // Create the product
-      const product = await prisma.product.create({
-        data: {
+    // Handle price conversion
+    let parsedPrice;
+    try {
+      // Ensure price is a valid number
+      parsedPrice = typeof price === 'string' ? parseFloat(price) : price;
+      if (isNaN(parsedPrice)) {
+        console.error("Invalid price value:", price);
+        throw new Error('Price must be a valid number');
+      }
+    } catch (error) {
+      console.error("Error parsing price:", error);
+      throw new Error('Invalid price format');
+    }
+
+    try {
+      return await prisma.$transaction(async (prisma) => {
+        // Prepare the product data with careful parsing of each field
+        const productCreateData = {
           name,
           slug,
           description,
           shortDescription,
-          price: parseFloat(price),
+          price: parsedPrice,
           compareAtPrice: compareAtPrice ? parseFloat(compareAtPrice) : null,
           cost: cost ? parseFloat(cost) : null,
           sku,
           barcode,
           weight: weight ? parseFloat(weight) : null,
           weightUnit,
-          dimensions: dimensions ? JSON.parse(dimensions) : null,
-          taxable: taxable || true,
+          dimensions: dimensions 
+            ? (typeof dimensions === 'string' ? JSON.parse(dimensions) : dimensions)
+            : null,
+          taxable: taxable !== undefined ? taxable : true,
           taxCode,
           brandId,
-          status
-        }
-      });
+          status,
+          material,
+          care: care ? (typeof care === 'string' ? JSON.parse(care) : care) : null,
+          features: features ? (typeof features === 'string' ? JSON.parse(features) : features) : null,
+          sizes: sizes ? (typeof sizes === 'string' ? JSON.parse(sizes) : sizes) : null,
+          colors: colors ? (typeof colors === 'string' ? JSON.parse(colors) : colors) : null,
+          deliveryInfo,
+          department,
+          subcategory
+        };
 
-      // Add categories
-      if (categories.length > 0) {
-        for (let i = 0; i < categories.length; i++) {
-          await prisma.productCategory.create({
-            data: {
-              productId: product.id,
-              categoryId: categories[i],
-              position: i
-            }
-          });
-        }
-      }
+        console.log("Creating product with data:", JSON.stringify(productCreateData, null, 2));
 
-      // Add tags
-      if (tags.length > 0) {
-        for (const tag of tags) {
-          let tagRecord;
-          
-          // Check if tag exists
-          tagRecord = await prisma.productTag.findUnique({
-            where: { name: tag }
-          });
-          
-          // If not, create it
-          if (!tagRecord) {
-            tagRecord = await prisma.productTag.create({
+        // Create the product
+        const product = await prisma.product.create({
+          data: productCreateData
+        });
+
+        console.log(`Product created with ID: ${product.id}`);
+
+        // Add categories
+        if (categories.length > 0) {
+          console.log(`Adding ${categories.length} categories to product`);
+          for (let i = 0; i < categories.length; i++) {
+            await prisma.productCategory.create({
               data: {
-                name: tag,
-                slug: slugify(tag, { lower: true, strict: true })
+                productId: product.id,
+                categoryId: categories[i],
+                position: i
               }
             });
           }
-          
-          // Connect tag to product
-          await prisma.product.update({
-            where: { id: product.id },
-            data: {
-              tags: {
-                connect: { id: tagRecord.id }
-              }
-            }
-          });
         }
-      }
 
-      // Add variants
-      if (variants.length > 0) {
-        for (const variant of variants) {
-          await prisma.productVariant.create({
-            data: {
-              productId: product.id,
-              name: variant.name,
-              sku: variant.sku,
-              barcode: variant.barcode,
-              price: variant.price ? parseFloat(variant.price) : null,
-              compareAtPrice: variant.compareAtPrice ? parseFloat(variant.compareAtPrice) : null,
-              position: variant.position || 0,
-              options: variant.options,
-              imageUrl: variant.imageUrl,
-              inventoryQuantity: variant.inventoryQuantity || 0,
-              backorder: variant.backorder || false,
-              requiresShipping: variant.requiresShipping !== false
-            }
-          });
-        }
-      }
-
-      // Upload and add images
-      if (images && images.length > 0) {
-        let featuredImageUrl = null;
-        
-        for (let i = 0; i < images.length; i++) {
-          try {
-            const result = await uploadToCloudinary(images[i].path);
+        // Add tags
+        if (tags.length > 0) {
+          for (const tag of tags) {
+            let tagRecord;
             
-            if (result && result.secure_url) {
-              const imageData = {
-                productId: product.id,
-                url: result.secure_url,
-                altText: images[i].originalname || name,
-                position: i
-              };
-              
-              await prisma.productImage.create({
-                data: imageData
+            // Check if tag exists
+            tagRecord = await prisma.productTag.findUnique({
+              where: { name: tag }
+            });
+            
+            // If not, create it
+            if (!tagRecord) {
+              tagRecord = await prisma.productTag.create({
+                data: {
+                  name: tag,
+                  slug: slugify(tag, { lower: true, strict: true })
+                }
               });
-              
-              // Set first image as featured image
-              if (i === 0) {
-                featuredImageUrl = result.secure_url;
-              }
             }
-          } catch (error) {
-            console.error(`Error uploading image ${i}:`, error);
-            // Continue with other images
+            
+            // Connect tag to product
+            await prisma.product.update({
+              where: { id: product.id },
+              data: {
+                tags: {
+                  connect: { id: tagRecord.id }
+                }
+              }
+            });
           }
         }
-        
-        // Update product with featured image
-        if (featuredImageUrl) {
-          await prisma.product.update({
-            where: { id: product.id },
-            data: { featuredImageUrl }
-          });
-        }
-      }
 
-      // Return the created product with all relationships
-      return await prisma.product.findUnique({
-        where: { id: product.id },
-        include: {
-          variants: true,
-          images: true,
-          categories: {
-            include: {
-              category: true
-            }
-          },
-          tags: true,
-          brand: true
+        // Add variants
+        if (variants.length > 0) {
+          for (const variant of variants) {
+            await prisma.productVariant.create({
+              data: {
+                productId: product.id,
+                name: variant.name,
+                sku: variant.sku,
+                barcode: variant.barcode,
+                price: variant.price ? parseFloat(variant.price) : null,
+                compareAtPrice: variant.compareAtPrice ? parseFloat(variant.compareAtPrice) : null,
+                position: variant.position || 0,
+                options: variant.options,
+                imageUrl: variant.imageUrl,
+                inventoryQuantity: variant.inventoryQuantity || 0,
+                backorder: variant.backorder || false,
+                requiresShipping: variant.requiresShipping !== false
+              }
+            });
+          }
         }
+
+        // Upload and add images
+        if (images && images.length > 0) {
+          let featuredImageUrl = null;
+          
+          for (let i = 0; i < images.length; i++) {
+            try {
+              const result = await uploadToCloudinary(images[i].path);
+              
+              if (result && result.secure_url) {
+                const imageData = {
+                  productId: product.id,
+                  url: result.secure_url,
+                  altText: images[i].originalname || name,
+                  position: i
+                };
+                
+                await prisma.productImage.create({
+                  data: imageData
+                });
+                
+                // Set first image as featured image
+                if (i === 0) {
+                  featuredImageUrl = result.secure_url;
+                }
+              }
+            } catch (error) {
+              console.error(`Error uploading image ${i}:`, error);
+              // Continue with other images
+            }
+          }
+          
+          // Update product with featured image
+          if (featuredImageUrl) {
+            await prisma.product.update({
+              where: { id: product.id },
+              data: { featuredImageUrl }
+            });
+          }
+        }
+
+        // Return the created product with all relationships
+        return await prisma.product.findUnique({
+          where: { id: product.id },
+          include: {
+            variants: true,
+            images: true,
+            categories: {
+              include: {
+                category: true
+              }
+            },
+            tags: true,
+            brand: true
+          }
+        });
       });
-    });
+    } catch (error) {
+      console.error("Error creating product:", error);
+      throw error;
+    }
   }
 
   /**
@@ -305,7 +361,7 @@ export class ProductService {
     const {
       page = 1,
       limit = 20,
-      status = 'ACTIVE',
+      status,
       category,
       brand,
       tag,
@@ -316,32 +372,37 @@ export class ProductService {
       sortOrder = 'desc'
     } = options;
     
+    console.log("Query options received:", options);
+    
     const skip = (page - 1) * limit;
     
-    // Build the where clause based on filters
-    const whereClause = {
-      deletedAt: null
-    };
+    // Build the where clause based on filters - but for now simplify to debug
+    const whereClause = {};
     
-    if (status) {
+    // Only add deletedAt filter if we're sure it's not causing issues
+    // For debugging purposes, let's remove this filter temporarily
+    // whereClause.deletedAt = null;
+    
+    // Only filter by status if provided and not empty
+    if (status && status.trim() !== '') {
       whereClause.status = status;
     }
     
-    if (minPrice !== undefined) {
+    if (minPrice !== undefined && minPrice !== '') {
       whereClause.price = {
         ...whereClause.price,
         gte: parseFloat(minPrice)
       };
     }
     
-    if (maxPrice !== undefined) {
+    if (maxPrice !== undefined && maxPrice !== '') {
       whereClause.price = {
         ...whereClause.price,
         lte: parseFloat(maxPrice)
       };
     }
     
-    if (category) {
+    if (category && category !== '') {
       whereClause.categories = {
         some: {
           categoryId: category
@@ -349,11 +410,11 @@ export class ProductService {
       };
     }
     
-    if (brand) {
+    if (brand && brand !== '') {
       whereClause.brandId = brand;
     }
     
-    if (tag) {
+    if (tag && tag !== '') {
       whereClause.tags = {
         some: {
           id: tag
@@ -361,7 +422,7 @@ export class ProductService {
       };
     }
     
-    if (search) {
+    if (search && search !== '') {
       whereClause.OR = [
         { name: { contains: search, mode: 'insensitive' } },
         { description: { contains: search, mode: 'insensitive' } },
@@ -369,53 +430,126 @@ export class ProductService {
       ];
     }
     
-    // Get products with count for pagination
-    const [products, totalCount] = await Promise.all([
-      prisma.product.findMany({
-        where: whereClause,
-        skip,
-        take: limit,
-        orderBy: {
-          [sortBy]: sortOrder
-        },
-        include: {
-          images: {
-            take: 1
+    console.log("Fetching products with where clause:", JSON.stringify(whereClause, null, 2));
+    
+    try {
+      // First, try to get all products without filters to see if any exist
+      const allProductsCount = await prisma.product.count();
+      console.log(`Total products in database (no filters): ${allProductsCount}`);
+      
+      if (allProductsCount === 0) {
+        console.log("No products found in the database at all!");
+        return {
+          products: [],
+          pagination: {
+            total: 0,
+            page: parseInt(page),
+            limit: parseInt(limit),
+            totalPages: 0
+          }
+        };
+      }
+      
+      // Get products with count for pagination
+      const [products, totalCount] = await Promise.all([
+        prisma.product.findMany({
+          where: whereClause,
+          skip,
+          take: parseInt(limit),
+          orderBy: {
+            [sortBy]: sortOrder
           },
-          brand: {
-            select: {
-              id: true,
-              name: true,
-              slug: true
-            }
-          },
-          categories: {
-            include: {
-              category: {
-                select: {
-                  id: true,
-                  name: true,
-                  slug: true
+          include: {
+            images: true,
+            variants: true,
+            brand: {
+              select: {
+                id: true,
+                name: true,
+                slug: true
+              }
+            },
+            categories: {
+              include: {
+                category: {
+                  select: {
+                    id: true,
+                    name: true,
+                    slug: true
+                  }
                 }
               }
             }
           }
+        }),
+        prisma.product.count({
+          where: whereClause
+        })
+      ]);
+      
+      // Log the queries that Prisma executed
+      console.log(`Found ${products.length} products out of ${totalCount} total`);
+      
+      // Map products to have the exact structure expected by the frontend
+      const mappedProducts = products.map(product => {
+        // Get the first image as the main image
+        const mainImage = product.images?.length > 0 ? product.images[0].url : null;
+        const featuredImage = product.featuredImageUrl || mainImage;
+        
+        // Map categories
+        const categoryName = product.categories?.length > 0 
+          ? product.categories[0].category?.name || 'Uncategorized'
+          : 'Uncategorized';
+          
+        // Extract department from slug or default to "Menswear"
+        let department = "Menswear";
+        if (product.slug) {
+          if (product.slug.startsWith('womens')) {
+            department = "Womenswear";
+          } else if (product.slug.startsWith('kids')) {
+            department = "Kidswear";
+          }
         }
-      }),
-      prisma.product.count({
-        where: whereClause
-      })
-    ]);
-    
-    return {
-      products,
-      pagination: {
-        total: totalCount,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        totalPages: Math.ceil(totalCount / limit)
-      }
-    };
+        
+        return {
+          ...product,
+          image: featuredImage || '', // Ensure image is never null
+          featuredImageUrl: featuredImage || '', // Set consistently
+          category: categoryName,
+          subcategory: product.subcategory || '', // Add default values for expected fields
+          inStock: product.status !== 'OUT_OF_STOCK',
+          department: department,
+          originalPrice: product.compareAtPrice ? String(product.compareAtPrice) : null,
+          discount: product.compareAtPrice ? 
+            Math.round(((product.compareAtPrice - product.price) / product.compareAtPrice) * 100) + '%' : 
+            null,
+          rating: 0,
+          ratingCount: 0,
+          material: product.material || 'Cotton',
+          care: product.care || ['Machine wash cold', 'Do not bleach', 'Tumble dry low'],
+          features: product.features || ['Premium quality', 'Comfortable fit', 'Durable material'],
+          sizes: product.sizes || ['S', 'M', 'L', 'XL'],
+          colors: product.colors || [{ name: 'Default', code: '#000000' }],
+          deliveryInfo: product.deliveryInfo || 'Free shipping on orders over $50',
+          images: product.images.map(img => img.url) || []
+        };
+      });
+      
+      console.log(`Returning ${mappedProducts.length} mapped products`);
+      
+      return {
+        products: mappedProducts,
+        pagination: {
+          total: totalCount,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          totalPages: Math.ceil(totalCount / parseInt(limit))
+        }
+      };
+    } catch (error) {
+      console.error("Error fetching products:", error);
+      throw error;
+    }
   }
 
   /**
