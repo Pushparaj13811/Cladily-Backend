@@ -92,11 +92,13 @@ const getProductById = asyncHandler(async (req, res) => {
         const product = await productService.getProductById(productId);
         const transformedProduct = transformProductImages(product);
 
+        // Ensure we're sending the actual product data in the 'message' field
+        // and just a string in the 'data' field to match frontend expectations
         return res.status(HTTP_OK).json(
             new ApiResponse(
                 HTTP_OK,
-                transformedProduct,
-                "Product fetched successfully"
+                "Product fetched successfully",
+                transformedProduct
             )
         );
     } catch (error) {

@@ -22,17 +22,31 @@ export const transformProductImages = (product) => {
   // Transform product images array
   if (Array.isArray(product.images)) {
     transformedProduct.images = product.images.map(image => {
+      // If it's already a string URL, return as is
       if (typeof image === 'string') {
-        // If it's already a URL, return as is
         return image;
       }
-      // If it's an object with public_id, generate URL
-      return cloudinaryService.generateImageUrl(image.public_id, {
-        width: 800,
-        height: 800,
-        crop: 'fill'
-      });
+      
+      // If it has a url property, use that
+      if (image && typeof image === 'object' && image.url) {
+        return image.url;
+      }
+      
+      // If it has a public_id, generate URL
+      if (image && typeof image === 'object' && image.public_id) {
+        return cloudinaryService.generateImageUrl(image.public_id, {
+          width: 800,
+          height: 800,
+          crop: 'fill'
+        });
+      }
+      
+      // Default fallback if no recognizable format
+      return image;
     });
+  } else {
+    // Ensure images array is never null
+    transformedProduct.images = [];
   }
 
   // Transform variant images if they exist
@@ -51,6 +65,9 @@ export const transformProductImages = (product) => {
       return variant;
     });
   }
+
+  // Debugging log to verify images array
+  console.log("Transformed product images:", JSON.stringify(transformedProduct.images));
 
   return transformedProduct;
 };
