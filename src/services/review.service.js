@@ -1,5 +1,5 @@
 import { prisma } from "../database/connect.js";
-import { uploadToCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
+import cloudinaryService from './cloudinary.service.js';
 
 /**
  * Service for managing product reviews
@@ -67,7 +67,7 @@ export class ReviewService {
       const reviewImages = [];
       if (imageFiles && imageFiles.length > 0) {
         for (const file of imageFiles) {
-          const result = await uploadToCloudinary(file.path);
+          const result = await cloudinaryService.uploadImage(file.path);
           if (result && result.secure_url) {
             const image = await prisma.reviewImage.create({
               data: {
@@ -250,7 +250,7 @@ export class ReviewService {
         for (const image of imagesToDelete) {
           // Extract public ID from URL
           const publicId = image.url.split('/').pop().split('.')[0];
-          await deleteFromCloudinary(publicId);
+          await cloudinaryService.deleteImage(publicId);
         }
         
         // Delete from database
@@ -265,7 +265,7 @@ export class ReviewService {
       // Upload new images if provided
       if (newImageFiles && newImageFiles.length > 0) {
         for (const file of newImageFiles) {
-          const result = await uploadToCloudinary(file.path);
+          const result = await cloudinaryService.uploadImage(file.path);
           if (result && result.secure_url) {
             await prisma.reviewImage.create({
               data: {
@@ -337,7 +337,7 @@ export class ReviewService {
       for (const image of review.images) {
         // Extract public ID from URL
         const publicId = image.url.split('/').pop().split('.')[0];
-        await deleteFromCloudinary(publicId);
+        await cloudinaryService.deleteImage(publicId);
       }
 
       // Update product rating
