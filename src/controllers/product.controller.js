@@ -10,6 +10,9 @@ import {
 } from "../httpStatusCode.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import { ProductService } from "../services/product.service.js";
+import cloudinaryService from "../services/cloudinary.service.js";
+import { transformProductImages, transformProductsImages } from "../utils/imageUtils.js";
+import { prisma } from "../database/connect.js";
 
 // Initialize the service
 const productService = new ProductService();
@@ -20,143 +23,54 @@ const productService = new ProductService();
 const createProduct = asyncHandler(async (req, res) => {
     const { files, user } = req;
     let productData = req.body;
-    
+
     console.log("Raw product creation request body:", JSON.stringify(productData, null, 2));
     console.log("Files received:", files?.images ? files.images.length : 0);
-    
+    console.log("Files details:", files?.images ? JSON.stringify(files.images.map(f => ({
+        fieldname: f.fieldname,
+        originalname: f.originalname,
+        path: f.path,
+        size: f.size
+    })), null, 2) : 'No files');
+
     // Handle both form data and direct JSON submissions
-    // If the request is multipart/form-data, the product data might be in a JSON string
     if (typeof productData.productData === 'string') {
         try {
             const parsedData = JSON.parse(productData.productData);
-            console.log("Parsed productData from JSON string:", JSON.stringify(parsedData, null, 2));
-            
-            // Merge parsed data with any direct fields (some implementations send both)
             productData = {
-                ...productData,  // Keep original fields
-                ...parsedData    // Override with parsed fields
+                ...productData,
+                ...parsedData
             };
-            
-            // Remove the raw productData string to avoid confusion
             delete productData.productData;
-            
-            console.log("Merged product data:", JSON.stringify(productData, null, 2));
         } catch (error) {
             console.error("Failed to parse productData JSON:", error);
             throw new ApiError(HTTP_BAD_REQUEST, "Invalid product data format");
         }
     }
-    
-    // Check for individual fields that were sent directly in form data
-    // This helps with implementations that append individual fields rather than using productData
-    const directFields = [
-        'name', 'description', 'shortDescription', 'price', 'compareAtPrice', 
-        'cost', 'sku', 'barcode', 'weight', 'weightUnit', 'status', 'taxable',
-        'departmentId'
-    ];
-    
-    directFields.forEach(field => {
-        if (req.body[field] !== undefined && (!productData[field] || field === 'price')) {
-            try {
-                // Try to parse JSON strings that might represent objects/arrays
-                if (typeof req.body[field] === 'string' && 
-                   (req.body[field].startsWith('[') || req.body[field].startsWith('{'))) {
-                    productData[field] = JSON.parse(req.body[field]);
-                } 
-                // Handle numeric fields
-                else if (['price', 'compareAtPrice', 'cost', 'weight'].includes(field) && 
-                         typeof req.body[field] === 'string') {
-                    const numValue = parseFloat(req.body[field]);
-                    if (!isNaN(numValue)) {
-                        productData[field] = numValue;
-                    } else {
-                        productData[field] = req.body[field];
-                    }
-                }
-                // Otherwise use the value directly
-                else {
-                    productData[field] = req.body[field];
-                }
-                console.log(`Set ${field} from direct form field:`, productData[field]);
-            } catch (error) {
-                console.error(`Error parsing direct field ${field}:`, error);
-                // Keep the original string value if parsing fails
-                productData[field] = req.body[field];
-            }
-        }
-    });
-    
-    // Handle specific fields that need special treatment
-    
-    // Parse variants to ensure proper format
-    if (productData.variants && typeof productData.variants === 'string') {
-        try {
-            productData.variants = JSON.parse(productData.variants);
-            console.log("Parsed variants:", productData.variants);
-        } catch (error) {
-            console.error("Failed to parse variants:", error);
-            // If parsing fails, initialize as empty array
-            productData.variants = [];
-        }
-    } else if (!productData.variants) {
-        productData.variants = [];
+
+    // Remove the images array from productData since we'll use the actual files
+    if (productData.images) {
+        delete productData.images;
     }
-    
-    // Parse categories to ensure proper format
-    if (productData.categoryIds && typeof productData.categoryIds === 'string') {
-        try {
-            productData.categoryIds = JSON.parse(productData.categoryIds);
-            console.log("Parsed categoryIds:", productData.categoryIds);
-        } catch (error) {
-            console.error("Failed to parse categoryIds:", error);
-            // If parsing fails, initialize as empty array
-            productData.categoryIds = [];
-        }
-    } else if (!productData.categoryIds) {
-        productData.categoryIds = [];
-    }
-    
-    // Handle departmentId
-    if (productData.departmentId && typeof productData.departmentId === 'string') {
-        console.log("Using department ID:", productData.departmentId);
-    }
-    
-    // Ensure the minimum required fields are present (name, description, price)
-    if (!productData.name) {
-        throw new ApiError(HTTP_BAD_REQUEST, "Product name is required");
-    }
-    
-    if (!productData.description) {
-        throw new ApiError(HTTP_BAD_REQUEST, "Product description is required");
-    }
-    
-    if (!productData.price && productData.price !== 0) {
-        throw new ApiError(HTTP_BAD_REQUEST, "Product price is required");
-    }
-    
+
     try {
-        // Transform categoryIds into categories array for the service
-        if (productData.categoryIds && Array.isArray(productData.categoryIds)) {
-            productData.categories = productData.categoryIds;
-            console.log("Set categories from categoryIds:", productData.categories);
-        } else if (productData.category) {
-            productData.categories = [productData.category];
-            console.log("Set categories from category:", productData.categories);
-        }
-        
-        console.log("Final productData being sent to service:", JSON.stringify(productData, null, 2));
-        const product = await productService.createProduct(productData, files?.images, user.id);
-        console.log("Product created successfully:", product.id);
+        // Ensure files.images is an array
+        const imageFiles = files?.images ? (Array.isArray(files.images) ? files.images : [files.images]) : [];
+        console.log("Passing images to service:", imageFiles.length);
+
+        // Pass the files directly to the service
+        const product = await productService.createProduct(productData, user.id, imageFiles);
+        const transformedProduct = transformProductImages(product);
 
         return res.status(HTTP_CREATED).json(
             new ApiResponse(
-                HTTP_CREATED, 
-                product, 
+                HTTP_CREATED,
+                transformedProduct,
                 "Product created successfully"
             )
         );
     } catch (error) {
-        console.error("Error in createProduct:", error);
+        console.error("Error in createProduct controller:", error);
         throw new ApiError(
             error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
             error.message || "Error creating product"
@@ -176,11 +90,12 @@ const getProductById = asyncHandler(async (req, res) => {
 
     try {
         const product = await productService.getProductById(productId);
+        const transformedProduct = transformProductImages(product);
 
         return res.status(HTTP_OK).json(
             new ApiResponse(
-                HTTP_OK, 
-                product, 
+                HTTP_OK,
+                transformedProduct,
                 "Product fetched successfully"
             )
         );
@@ -188,7 +103,7 @@ const getProductById = asyncHandler(async (req, res) => {
         if (error.message === "Product not found") {
             throw new ApiError(HTTP_NOT_FOUND, "Product not found");
         }
-        
+
         throw new ApiError(
             error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
             error.message || "Error retrieving product"
@@ -211,8 +126,8 @@ const getProductBySlug = asyncHandler(async (req, res) => {
 
         return res.status(HTTP_OK).json(
             new ApiResponse(
-                HTTP_OK, 
-                product, 
+                HTTP_OK,
+                product,
                 "Product fetched successfully"
             )
         );
@@ -220,9 +135,9 @@ const getProductBySlug = asyncHandler(async (req, res) => {
         if (error.message === "Product not found") {
             throw new ApiError(HTTP_NOT_FOUND, "Product not found");
         }
-        
-                throw new ApiError(
-                    error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
+
+        throw new ApiError(
+            error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
             error.message || "Error retrieving product"
         );
     }
@@ -233,8 +148,6 @@ const getProductBySlug = asyncHandler(async (req, res) => {
  */
 const getAllProducts = asyncHandler(async (req, res) => {
     try {
-        console.log("GET /products request received with query params:", req.query);
-        
         const {
             page,
             limit,
@@ -263,26 +176,17 @@ const getAllProducts = asyncHandler(async (req, res) => {
             department: departmentId
         });
 
-        console.log(`API response prepared: ${result.products.length} products found`);
-        console.log("API response:", result);
-        
-        const response = new ApiResponse(
-            HTTP_OK, 
-            result, 
-            "Products fetched successfully"
-        );
-        
-        console.log("Sending API response:", {
-            success: response.success,
-            statusCode: response.statusCode,
-            message: response.message,
-            dataLength: result.products.length
-        });
-        
+        // Transform products to include generated image URLs
+        const transformedProducts = transformProductsImages(result.products);
+        const transformedResult = {
+            ...result,
+            products: transformedProducts
+        };
+
         return res.status(HTTP_OK).json(
             new ApiResponse(
-                HTTP_OK, 
-                result, 
+                HTTP_OK,
+                transformedResult,
                 "Products fetched successfully"
             )
         );
@@ -307,7 +211,7 @@ const updateProduct = asyncHandler(async (req, res) => {
         throw new ApiError(HTTP_BAD_REQUEST, "Product ID is required");
     }
 
-    // If the request is multipart/form-data, the product data might be in a JSON string
+    // Parse product data if it's a string
     if (typeof updateData.productData === 'string') {
         try {
             updateData = JSON.parse(updateData.productData);
@@ -315,72 +219,68 @@ const updateProduct = asyncHandler(async (req, res) => {
             throw new ApiError(HTTP_BAD_REQUEST, "Invalid product data format");
         }
     }
-    
-    // Parse variants to ensure proper format
-    if (updateData.variants && typeof updateData.variants === 'string') {
+
+    // Handle image uploads
+    let uploadedImages = [];
+    if (files?.images) {
         try {
-            updateData.variants = JSON.parse(updateData.variants);
-        } catch {
-            // If parsing fails, keep it as a string - the service will handle it
+            uploadedImages = await cloudinaryService.uploadMultipleImages(files.images);
+
+            // Update product data with new image public_ids
+            if (uploadedImages.length > 0) {
+                updateData.images = [
+                    ...(updateData.images || []),
+                    ...uploadedImages.map(img => ({ public_id: img.public_id }))
+                ];
+            }
+        } catch (error) {
+            console.error("Failed to upload images:", error);
+            throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, "Failed to upload product images");
         }
     }
-    
-    // Parse categories to ensure proper format
-    if (updateData.categoryIds && typeof updateData.categoryIds === 'string') {
-        try {
-            updateData.categoryIds = JSON.parse(updateData.categoryIds);
-        } catch {
-            // If parsing fails, keep it as a string - the service will handle it
-        }
-    }
-    
-    // Parse deleteImages to ensure proper format
-    let deleteImages = [];
+
+    // Handle image deletions
     if (updateData.deleteImages) {
         try {
-            deleteImages = typeof updateData.deleteImages === 'string' 
-                ? JSON.parse(updateData.deleteImages) 
-                : updateData.deleteImages;
+            const imagesToDelete = Array.isArray(updateData.deleteImages)
+                ? updateData.deleteImages
+                : [updateData.deleteImages];
+
+            await cloudinaryService.deleteMultipleImages(imagesToDelete);
         } catch (error) {
-            console.error('Failed to parse deleteImages:', error);
-            deleteImages = [];
+            console.error("Failed to delete images:", error);
+            throw new ApiError(HTTP_INTERNAL_SERVER_ERROR, "Failed to delete product images");
         }
     }
 
     try {
-        // Check if admin for non-mongo systems
-        const isAdmin = user.role === 'ADMIN';
-        
-        if (!isAdmin) {
-            throw new ApiError(HTTP_FORBIDDEN, "Only admins can update products");
-        }
-
-        // Transform categoryIds into categories array for the service
-        if (updateData.categoryIds && Array.isArray(updateData.categoryIds)) {
-            updateData.categories = updateData.categoryIds;
-        } else if (updateData.category) {
-            updateData.categories = [updateData.category];
-        }
-
         const product = await productService.updateProduct(
-            productId, 
-            updateData, 
-            files?.images, 
-            deleteImages
+            productId,
+            updateData,
+            user.id
         );
 
+        const transformedProduct = transformProductImages(product);
+
         return res.status(HTTP_OK).json(
-                new ApiResponse(
-                    HTTP_OK,
-                product, 
+            new ApiResponse(
+                HTTP_OK,
+                transformedProduct,
                 "Product updated successfully"
-                )
-            );
+            )
+        );
     } catch (error) {
+        // If update fails, delete newly uploaded images
+        if (uploadedImages.length > 0) {
+            await cloudinaryService.deleteMultipleImages(
+                uploadedImages.map(img => img.public_id)
+            );
+        }
+
         if (error.message === "Product not found") {
             throw new ApiError(HTTP_NOT_FOUND, "Product not found");
         }
-        
+
         throw new ApiError(
             error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
             error.message || "Error updating product"
@@ -400,19 +300,24 @@ const deleteProduct = asyncHandler(async (req, res) => {
     }
 
     try {
-        // Check if admin
-        const isAdmin = user.role === 'ADMIN';
-        
-        if (!isAdmin) {
-            throw new ApiError(HTTP_FORBIDDEN, "Only admins can delete products");
-        }
 
+        // Delete the product
         await productService.deleteProduct(productId);
+
+        const images = await prisma.productImage.findMany({
+            where: {
+                productId: productId
+            }
+        });
+
+        if (images.length > 0) {
+            await cloudinaryService.deleteMultipleImages(images.map(img => img.public_id));
+        }
 
         return res.status(HTTP_OK).json(
             new ApiResponse(
-                HTTP_OK, 
-                null, 
+                HTTP_OK,
+                null,
                 "Product deleted successfully"
             )
         );
@@ -420,7 +325,7 @@ const deleteProduct = asyncHandler(async (req, res) => {
         if (error.message === "Product not found") {
             throw new ApiError(HTTP_NOT_FOUND, "Product not found");
         }
-        
+
         throw new ApiError(
             error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
             error.message || "Error deleting product"
@@ -444,8 +349,8 @@ const getRelatedProducts = asyncHandler(async (req, res) => {
 
         return res.status(HTTP_OK).json(
             new ApiResponse(
-                HTTP_OK, 
-                products, 
+                HTTP_OK,
+                products,
                 "Related products fetched successfully"
             )
         );
@@ -453,7 +358,7 @@ const getRelatedProducts = asyncHandler(async (req, res) => {
         if (error.message === "Product not found") {
             throw new ApiError(HTTP_NOT_FOUND, "Product not found");
         }
-        
+
         throw new ApiError(
             error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
             error.message || "Error retrieving related products"
@@ -480,7 +385,7 @@ const updateInventory = asyncHandler(async (req, res) => {
     try {
         // Check if admin
         const isAdmin = user.role === 'ADMIN';
-        
+
         if (!isAdmin) {
             throw new ApiError(HTTP_FORBIDDEN, "Only admins can update inventory");
         }
@@ -488,17 +393,17 @@ const updateInventory = asyncHandler(async (req, res) => {
         const result = await productService.updateInventory(productId, variantId, parseInt(quantity));
 
         return res.status(HTTP_OK).json(
-                new ApiResponse(
-                    HTTP_OK,
-                result, 
+            new ApiResponse(
+                HTTP_OK,
+                result,
                 "Inventory updated successfully"
-                )
-            );
+            )
+        );
     } catch (error) {
         if (error.message.includes("not found")) {
             throw new ApiError(HTTP_NOT_FOUND, error.message);
         }
-        
+
         throw new ApiError(
             error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
             error.message || "Error updating inventory"
