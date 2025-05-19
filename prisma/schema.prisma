@@ -221,13 +221,19 @@ model Product {
   featuredImageUrl String?
   searchKeywords   String?       @db.Text
   metadata         Json?
+  material         String? // Material of the product
+  care             Json? // Array of care instructions
+  features         Json? // Array of product features
+  sizes            Json? // Array of available sizes
+  colors           Json? // Array of color options
+  subcategory      String? // Product subcategory
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
   deletedAt        DateTime?
 
   // Relations
   departmentId String?
-  department   Department? @relation(fields: [departmentId], references: [id])
+  department   Department?       @relation(fields: [departmentId], references: [id])
   variants     ProductVariant[]
   images       ProductImage[]
   categories   ProductCategory[]
@@ -286,6 +292,7 @@ model ProductImage {
   product   Product  @relation(fields: [productId], references: [id])
   url       String
   altText   String?
+  publicId  String?
   position  Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -307,8 +314,8 @@ model Category {
   isVisible       Boolean    @default(true)
   level           Int        @default(0) // Hierarchy level (0 for root categories)
   path            String     @default("/") // Path in category tree (e.g., /1/5/12/)
-  departmentId    String?
-  department      Department? @relation(fields: [departmentId], references: [id])
+  departmentId    String
+  department      Department @relation(fields: [departmentId], references: [id])
   metaTitle       String?
   metaDescription String?
   metaKeywords    String?
