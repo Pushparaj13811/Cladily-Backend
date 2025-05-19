@@ -5,7 +5,8 @@ import {
     getDepartmentById,
     getProductsByDepartment,
     updateDepartment,
-    deleteDepartment
+    deleteDepartment,
+    getCategoriesByDepartment
 } from '../controllers/department.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 
@@ -15,6 +16,7 @@ const router = Router();
 router.get('/', getAllDepartments);
 router.get('/:departmentId', getDepartmentById);
 router.get('/:departmentId/products', getProductsByDepartment);
+router.get('/:departmentId/categories', getCategoriesByDepartment);
 
 // Protected routes - require authentication
 router.use(authenticate);

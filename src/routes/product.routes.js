@@ -10,7 +10,7 @@ import {
     updateInventory
 } from "../controllers/product.controller.js";
 import { authenticate, isAdmin } from "../middlewares/auth.middleware.js";
-import { handleDynamicFields, upload } from "../middlewares/multer.middleware.js";
+import { handleFileUpload, handleDynamicFields } from "../middlewares/multer.middleware.js";
 import { rateLimiter } from "../middlewares/rateLimiter.middleware.js";
 import { PUBLIC_API_LIMITS, ADMIN_API_LIMITS } from "../utils/rateLimitWindows.js";
 
@@ -36,10 +36,10 @@ router.get("/:productId", rateLimiter(PUBLIC_API_LIMITS.HIGH_VOLUME), getProduct
 router.use(authenticate);
 
 // Create product (admin only)
-router.post("/", isAdmin, rateLimiter(ADMIN_API_LIMITS.WRITE), upload, handleDynamicFields, createProduct);
+router.post("/", isAdmin, rateLimiter(ADMIN_API_LIMITS.WRITE), handleFileUpload, handleDynamicFields, createProduct);
 
 // Update product (admin only)
-router.put("/:productId", isAdmin, rateLimiter(ADMIN_API_LIMITS.WRITE), upload, handleDynamicFields, updateProduct);
+router.put("/:productId", isAdmin, rateLimiter(ADMIN_API_LIMITS.WRITE), handleFileUpload, handleDynamicFields, updateProduct);
 
 // Delete product (admin only)
 router.delete("/:productId", isAdmin, rateLimiter(ADMIN_API_LIMITS.WRITE), deleteProduct);
