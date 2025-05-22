@@ -10,9 +10,11 @@ import {
 } from "../httpStatusCode.js";
 import asyncHandler from "../utils/asyncHandler.js";
 import { DepartmentService } from "../services/department.service.js";
+import { ImageService } from "../services/image.service.js";
 
-// Initialize the service
+// Initialize the services
 const departmentService = new DepartmentService();
+const imageService = new ImageService();
 
 /**
  * Create new department
@@ -20,28 +22,35 @@ const departmentService = new DepartmentService();
 const createDepartment = asyncHandler(async (req, res) => {
     const { user } = req;
     const { name, description } = req.body;
-    
+
     // Validate input
     if (!name) {
         throw new ApiError(HTTP_BAD_REQUEST, "Department name is required");
     }
-    
+
     // Check if admin
     const isAdmin = user.role === 'ADMIN' || user.role === 'SUPER_ADMIN';
     if (!isAdmin) {
         throw new ApiError(HTTP_FORBIDDEN, "Only admins can create departments");
     }
-    
+
     try {
+        let imageId = null;
+        if (req.files && req.files.image && req.files.image[0]) {
+            const image = await imageService.uploadImage(req.files.image[0]);
+            imageId = image.public_id;
+        }
+
         const department = await departmentService.createDepartment({
             name,
-            description
+            description,
+            imageId
         });
 
         return res.status(HTTP_CREATED).json(
             new ApiResponse(
-                HTTP_CREATED, 
-                department, 
+                HTTP_CREATED,
+                department,
                 "Department created successfully"
             )
         );
@@ -63,8 +72,8 @@ const getAllDepartments = asyncHandler(async (req, res) => {
 
         return res.status(HTTP_OK).json(
             new ApiResponse(
-                HTTP_OK, 
-                departments, 
+                HTTP_OK,
+                departments,
                 "Departments fetched successfully"
             )
         );
@@ -92,8 +101,8 @@ const getDepartmentById = asyncHandler(async (req, res) => {
 
         return res.status(HTTP_OK).json(
             new ApiResponse(
-                HTTP_OK, 
-                department, 
+                HTTP_OK,
+                department,
                 "Department fetched successfully"
             )
         );
@@ -101,7 +110,7 @@ const getDepartmentById = asyncHandler(async (req, res) => {
         if (error.message === "Department not found") {
             throw new ApiError(HTTP_NOT_FOUND, "Department not found");
         }
-        
+
         console.error("Error in getDepartmentById:", error);
         throw new ApiError(
             error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
@@ -137,8 +146,8 @@ const getProductsByDepartment = asyncHandler(async (req, res) => {
 
         return res.status(HTTP_OK).json(
             new ApiResponse(
-                HTTP_OK, 
-                result, 
+                HTTP_OK,
+                result,
                 "Department products fetched successfully"
             )
         );
@@ -146,7 +155,7 @@ const getProductsByDepartment = asyncHandler(async (req, res) => {
         if (error.message === "Department not found") {
             throw new ApiError(HTTP_NOT_FOUND, "Department not found");
         }
-        
+
         console.error("Error in getProductsByDepartment:", error);
         throw new ApiError(
             error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
@@ -174,15 +183,21 @@ const updateDepartment = asyncHandler(async (req, res) => {
     }
 
     try {
-        const department = await departmentService.updateDepartment(departmentId, {
-            name,
-            description
-        });
+        const updateData = { name, description };
+
+        // Handle image upload if present
+        if (req.files && req.files.image && req.files.image[0]) {
+            const image = await imageService.uploadImage(req.files.image[0]);
+            console.log("Image uploaded:", image);
+            updateData.imageId = image.public_id;
+        }
+
+        const department = await departmentService.updateDepartment(departmentId, updateData);
 
         return res.status(HTTP_OK).json(
             new ApiResponse(
-                HTTP_OK, 
-                department, 
+                HTTP_OK,
+                department,
                 "Department updated successfully"
             )
         );
@@ -190,7 +205,7 @@ const updateDepartment = asyncHandler(async (req, res) => {
         if (error.message === "Department not found") {
             throw new ApiError(HTTP_NOT_FOUND, "Department not found");
         }
-        
+
         console.error("Error in updateDepartment:", error);
         throw new ApiError(
             error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
@@ -221,8 +236,8 @@ const deleteDepartment = asyncHandler(async (req, res) => {
 
         return res.status(HTTP_OK).json(
             new ApiResponse(
-                HTTP_OK, 
-                null, 
+                HTTP_OK,
+                null,
                 "Department deleted successfully"
             )
         );
@@ -230,7 +245,7 @@ const deleteDepartment = asyncHandler(async (req, res) => {
         if (error.message === "Department not found") {
             throw new ApiError(HTTP_NOT_FOUND, "Department not found");
         }
-        
+
         console.error("Error in deleteDepartment:", error);
         throw new ApiError(
             error.statusCode || HTTP_INTERNAL_SERVER_ERROR,
@@ -251,11 +266,11 @@ const getCategoriesByDepartment = asyncHandler(async (req, res) => {
 
     try {
         const department = await departmentService.getDepartmentById(departmentId);
-        
+
         return res.status(HTTP_OK).json(
             new ApiResponse(
-                HTTP_OK, 
-                department.categories, 
+                HTTP_OK,
+                department.categories,
                 "Department categories fetched successfully"
             )
         );
@@ -263,7 +278,7 @@ const getCategoriesByDepartment = asyncHandler(async (req, res) => {
         if (error.message === "Department not found") {
             throw new ApiError(HTTP_NOT_FOUND, "Department not found");
         }
-        
+
         console.error("Error in getCategoriesByDepartment:", error);
         throw new ApiError(
             error.statusCode || HTTP_INTERNAL_SERVER_ERROR,

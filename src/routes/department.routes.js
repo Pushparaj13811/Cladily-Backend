@@ -9,6 +9,7 @@ import {
     getCategoriesByDepartment
 } from '../controllers/department.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
+import { handleFileUpload } from '../middlewares/multer.middleware.js';
 
 const router = Router();
 
@@ -21,8 +22,8 @@ router.get('/:departmentId/categories', getCategoriesByDepartment);
 // Protected routes - require authentication
 router.use(authenticate);
  
-router.post('/', createDepartment);
-router.put('/:departmentId', updateDepartment);
+router.post('/', handleFileUpload, createDepartment);
+router.put('/:departmentId', handleFileUpload, updateDepartment);
 router.delete('/:departmentId', deleteDepartment);
 
 export default router; 

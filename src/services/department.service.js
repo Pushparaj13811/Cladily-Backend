@@ -11,7 +11,7 @@ export class DepartmentService {
    * @returns {Object} Created department
    */
   async createDepartment(departmentData) {
-    const { name, description } = departmentData;
+    const { name, description, imageId } = departmentData;
     
     // Create slug from name
     const slug = slugify(name, { lower: true, strict: true });
@@ -27,6 +27,7 @@ export class DepartmentService {
     });
     
     if (existingDepartment) {
+      console.log('Department with this name already exists');
       throw new Error('Department with this name already exists');
     }
     
@@ -35,7 +36,8 @@ export class DepartmentService {
       data: {
         name,
         slug,
-        description
+        description,
+        imageId
       }
     });
     
@@ -216,7 +218,7 @@ export class DepartmentService {
    * @returns {Object} Updated department
    */
   async updateDepartment(departmentId, updateData) {
-    const { name, description } = updateData;
+    const { name, description, imageId } = updateData;
     
     // Check if department exists
     const department = await prisma.department.findUnique({
@@ -254,6 +256,10 @@ export class DepartmentService {
       
       updateValues.name = name;
       updateValues.slug = slug;
+    }
+
+    if (imageId) {
+      updateValues.imageId = imageId;
     }
     
     // Update department

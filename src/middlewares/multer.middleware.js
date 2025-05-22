@@ -47,7 +47,8 @@ const upload = multer({
         files: 10 // Maximum 10 files
     }
 }).fields([
-    { name: 'images', maxCount: 10 }
+    { name: 'image', maxCount: 1 },  // For single image upload
+    { name: 'images', maxCount: 10 } // For multiple image upload
 ]);
 
 // Middleware to handle file uploads
